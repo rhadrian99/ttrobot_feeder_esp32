@@ -2,10 +2,11 @@
 #include <DNSServer.h>
 #include <FastAccelStepper.h>
 #include <Preferences.h>
+#include <Update.h>
 #include <WebServer.h>
 #include <WiFi.h>
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.0.3"
 
 const char __attribute__((used)) FW_VERSION_TAG[] = "\xFE\xED\xBE\xEF" FW_VERSION;
 
@@ -61,11 +62,13 @@ button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-we
 button.off{background:#f94144;color:#fff}
 .meta{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;color:#b8c5d1;font-size:12px}
 .meta div{border:1px solid #314052;border-radius:8px;padding:10px;background:#111b25}
+.meta .wide{grid-column:1/-1}
 .settings{margin-top:14px;border:1px solid #314052;background:#111b25;border-radius:8px;padding:14px}
 .settings h2{font-size:18px;color:#f9c74f;margin-bottom:10px;letter-spacing:0}
 .grid{display:grid;gap:10px}
 label{display:grid;gap:5px;color:#b8c5d1;font-size:12px}
 input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;color:#f4f0e8;padding:11px;font-size:16px}
+input[type=file]{font-size:13px;color:#b8c5d1}
 .switchRow{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#b8c5d1;font-size:12px;margin-top:10px}
 .switch{position:relative;display:inline-block;width:54px;height:30px;flex:0 0 auto}
 .switch input{opacity:0;width:0;height:0}
@@ -74,8 +77,10 @@ input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;c
 .switch input:checked+.slider{background:#f94144}
 .switch input:checked+.slider:before{transform:translateX(24px)}
 #saveSettings{margin-top:12px;font-size:16px;padding:13px;background:#f9c74f;color:#101820}
+#updateFirmware{margin-top:12px;font-size:16px;padding:13px;background:#f3722c;color:#101820}
 #settingsBox[disabled]{opacity:.48}
-#settingsMsg{min-height:18px;margin-top:8px;color:#9fb3c8;font-size:12px;text-align:center}
+#firmwareBox[disabled]{opacity:.48}
+#settingsMsg,#firmwareMsg{min-height:18px;margin-top:8px;color:#9fb3c8;font-size:12px;text-align:center}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;place-items:center;padding:18px;z-index:5}
 .modal.open{display:grid}
 .modalBox{width:min(360px,100%);border:1px solid #46576a;background:#172330;border-radius:8px;padding:18px;box-shadow:0 18px 45px rgba(0,0,0,.45)}
@@ -84,12 +89,14 @@ input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;c
 .modalActions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .modalActions button{font-size:15px;padding:12px}
 #cancelSave{background:#314052;color:#f4f0e8}
+#cancelUpdate{background:#314052;color:#f4f0e8}
 #confirmSave{background:#f9c74f;color:#101820}
+#confirmUpdate{background:#f3722c;color:#101820}
 </style>
 </head>
 <body>
 <main class="panel">
-  <h1>ESP32 Feeder</h1>
+  <h1 id="appTitle">ESP32 Feeder</h1>
   <div class="sub">Access Point local: http://192.168.4.1</div>
   <section class="status">
     <div class="label">Stare feeder</div>
@@ -125,6 +132,16 @@ input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;c
     </fieldset>
     <div id="settingsMsg"></div>
   </section>
+  <section class="settings">
+    <h2>Update firmware</h2>
+    <fieldset id="firmwareBox">
+      <label>Fisier firmware (.bin)
+        <input id="firmwareFile" type="file" accept=".bin,application/octet-stream">
+      </label>
+      <button id="updateFirmware" type="button" onclick="askFirmwareUpdate()">UPDATE FIRMWARE</button>
+    </fieldset>
+    <div id="firmwareMsg"></div>
+  </section>
 </main>
 <div id="saveModal" class="modal">
   <div class="modalBox">
@@ -133,6 +150,16 @@ input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;c
     <div class="modalActions">
       <button id="cancelSave" type="button" onclick="closeSaveModal()">ANULEAZA</button>
       <button id="confirmSave" type="button" onclick="confirmSaveSettings()">SALVEAZA</button>
+    </div>
+  </div>
+</div>
+<div id="updateModal" class="modal">
+  <div class="modalBox">
+    <h2>Confirmare update</h2>
+    <p>Vrei sa incarci si sa flash-uiesti firmware-ul selectat? ESP32-ul va reporni dupa update.</p>
+    <div class="modalActions">
+      <button id="cancelUpdate" type="button" onclick="closeUpdateModal()">ANULEAZA</button>
+      <button id="confirmUpdate" type="button" onclick="confirmFirmwareUpdate()">UPDATE</button>
     </div>
   </div>
 </div>
@@ -149,6 +176,26 @@ function loadSettings(){
 function askSaveSettings(){document.getElementById('saveModal').className='modal open';}
 function closeSaveModal(){document.getElementById('saveModal').className='modal';}
 function confirmSaveSettings(){closeSaveModal();saveSettings();}
+function askFirmwareUpdate(){
+  const file=document.getElementById('firmwareFile').files[0];
+  const msg=document.getElementById('firmwareMsg');
+  if(!file){msg.textContent='Alege un fisier .bin';return;}
+  document.getElementById('updateModal').className='modal open';
+}
+function closeUpdateModal(){document.getElementById('updateModal').className='modal';}
+function confirmFirmwareUpdate(){closeUpdateModal();uploadFirmware();}
+function uploadFirmware(){
+  const file=document.getElementById('firmwareFile').files[0];
+  const msg=document.getElementById('firmwareMsg');
+  if(!file){msg.textContent='Alege un fisier .bin';return;}
+  const body=new FormData();
+  body.append('firmware',file,file.name);
+  msg.textContent='Se incarca firmware-ul...';
+  fetch('/update',{method:'POST',body})
+    .then(r=>{if(!r.ok)throw new Error(r.status===409?'Opreste feederul inainte de update':'Update esuat');return r.text();})
+    .then(t=>{msg.textContent=t;})
+    .catch(e=>{msg.textContent=e.message;});
+}
 function saveSettings(){
   const msg=document.getElementById('settingsMsg');
   const body=new URLSearchParams({
@@ -172,8 +219,10 @@ function poll(){
     btn.textContent=d.running?'STOP':'START';
     btn.className=d.running?'off':'';
     settings.disabled=d.running;
+    document.getElementById('firmwareBox').disabled=d.running;
     document.getElementById('clients').textContent=d.clients;
     document.getElementById('ip').textContent=d.ip;
+    document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
   }).catch(()=>{});
 }
 setInterval(poll,1000);loadSettings();poll();
@@ -201,10 +250,15 @@ bool lastButtonReading = HIGH;
 bool debouncedButtonState = HIGH;
 bool statusLedState = LOW;
 bool wifiApReady = false;
+bool firmwareUpdateStarted = false;
+bool firmwareUpdateFailed = false;
+bool restartPending = false;
 uint32_t lastDebounceChangeMillis = 0;
 uint32_t lastStatusLedToggleMillis = 0;
 uint32_t lastWifiCheckMillis = 0;
+uint32_t restartAtMillis = 0;
 
+void setMotorEnabled(bool enabled);
 void toggleMotor();
 
 float constrainFloat(float value, float minimum, float maximum) {
@@ -323,14 +377,15 @@ void handleStatus() {
   char ipBuffer[16];
   formatIpAddress(ipBuffer, sizeof(ipBuffer), WiFi.softAPIP());
 
-  char json[128];
+  char json[160];
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\"}",
+    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\"}",
     motorRunning ? "true" : "false",
     WiFi.softAPgetStationNum(),
-    ipBuffer
+    ipBuffer,
+    FW_VERSION
   );
   server.send(200, "application/json", json);
 }
@@ -401,6 +456,65 @@ void handleStop() {
   server.send(200, "text/plain", "OK");
 }
 
+void handleFirmwareUpdateUpload() {
+  HTTPUpload &upload = server.upload();
+
+  if (motorRunning) {
+    firmwareUpdateFailed = true;
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_START) {
+    firmwareUpdateStarted = true;
+    firmwareUpdateFailed = false;
+    disableMotorWhenStopped = false;
+    setMotorEnabled(false);
+    Serial.printf("[OTA] Start update: %s\n", upload.filename.c_str());
+
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      firmwareUpdateFailed = true;
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!firmwareUpdateFailed && Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      firmwareUpdateFailed = true;
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (!firmwareUpdateFailed && Update.end(true)) {
+      Serial.printf("[OTA] Update complet: %u bytes\n", upload.totalSize);
+    } else {
+      firmwareUpdateFailed = true;
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    firmwareUpdateFailed = true;
+    Update.abort();
+    Serial.println("[OTA] Update anulat");
+  }
+}
+
+void handleFirmwareUpdateResult() {
+  if (motorRunning) {
+    server.send(409, "text/plain", "Opreste feederul inainte de update firmware");
+    return;
+  }
+
+  if (firmwareUpdateFailed || Update.hasError()) {
+    server.send(500, "text/plain", "Update firmware esuat");
+    return;
+  }
+
+  if (!firmwareUpdateStarted) {
+    server.send(400, "text/plain", "Lipseste fisierul firmware");
+    return;
+  }
+
+  restartPending = true;
+  restartAtMillis = millis() + 800;
+  server.send(200, "text/plain", "Firmware incarcat. ESP32 reporneste...");
+}
+
 void setupWebServer() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortal);
@@ -415,6 +529,7 @@ void setupWebServer() {
   server.on("/toggle", HTTP_POST, handleToggle);
   server.on("/start", HTTP_POST, handleStart);
   server.on("/stop", HTTP_POST, handleStop);
+  server.on("/update", HTTP_POST, handleFirmwareUpdateResult, handleFirmwareUpdateUpload);
   server.onNotFound(handleCaptivePortal);
   server.begin();
 }
@@ -541,6 +656,11 @@ void loop() {
 
   dnsServer.processNextRequest();
   server.handleClient();
+
+  if (restartPending && now >= restartAtMillis) {
+    Serial.println("[OTA] Restart dupa update firmware");
+    ESP.restart();
+  }
 
   if (now - lastWifiCheckMillis >= WifiHealthCheckMillis) {
     lastWifiCheckMillis = now;

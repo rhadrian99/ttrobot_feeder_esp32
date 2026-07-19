@@ -18,7 +18,7 @@ Adresa: http://192.168.4.1
 
 Sufixul `XXXX` este generat din identificatorul cipului, ca sa fie mai usor de distins daca ai mai multe placi.
 
-Pagina web include buton START/STOP, afiseaza starea curenta a feederului si are o sectiune de setari pentru motor. Butonul fizic si butonul web controleaza aceeasi stare.
+Pagina web include buton START/STOP, afiseaza starea curenta a feederului, versiunea firmware care ruleaza si are o sectiune de setari pentru motor. Butonul fizic si butonul web controleaza aceeasi stare.
 
 Sectiunea de setari este activa doar cand feederul este oprit. Cand motorul se invarte, campurile sunt blocate ca sa nu se schimbe viteza, acceleratia sau directia in timpul miscarii.
 
@@ -32,6 +32,8 @@ Setarile salvate in flash sunt:
 | Directie inversata | dezactivat | Schimba sensul de rotatie al motorului |
 
 Aceste valori sunt citite din flash la pornirea ESP32-ului. Daca nu exista inca valori salvate, firmware-ul foloseste valorile implicite.
+
+Sub setarile motorului exista sectiunea **Update firmware**. Alege un fisier `.bin`, apasa `UPDATE FIRMWARE`, confirma dialogul, iar ESP32-ul incarca firmware-ul in slotul OTA liber si reporneste dupa update. Update-ul este blocat cat timp feederul ruleaza.
 
 ## Conexiuni
 
@@ -72,20 +74,20 @@ Instaleaza extensia VS Code **PlatformIO IDE** sau PlatformIO CLI. Dupa instalar
 Versiunea firmware este definita in [src/main.cpp](src/main.cpp):
 
 ```cpp
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.0.3"
 ```
 
-La fiecare build, scriptul [copy_firmware.py](copy_firmware.py) copiaza automat binarul compilat in folderul `release`, cu versiunea in nume. De exemplu, versiunea `1.0.0` genereaza:
+La fiecare build, scriptul [copy_firmware.py](copy_firmware.py) copiaza automat binarul compilat in folderul `release`, cu versiunea in nume. De exemplu, versiunea `1.0.3` genereaza:
 
 ```text
-release/firmware100.bin
+release/firmware103.bin
 ```
 
 Pentru o versiune noua, modifica `FW_VERSION`, ruleaza build-ul si foloseste binarul nou din `release`.
 
-Proiectul foloseste schema de partitii `min_spiffs.csv`, pregatita pentru OTA: doua sloturi de aplicatie (`ota_0` si `ota_1`) si un SPIFFS mic. Asta permite ca mai tarziu aplicatia web sa primeasca un fisier `.bin` si sa scrie firmware-ul in slotul liber.
+Proiectul foloseste schema de partitii `min_spiffs.csv`, pregatita pentru OTA: doua sloturi de aplicatie (`ota_0` si `ota_1`) si un SPIFFS mic. Aplicatia web poate primi un fisier `.bin` si il poate scrie in slotul liber.
 
-Important: dupa schimbarea schemei de partitii, placa trebuie incarcata macar o data prin USB, ca noul partition table sa ajunga pe flash. Dupa aceea putem adauga upload-ul firmware via web.
+Important: dupa schimbarea schemei de partitii, placa trebuie incarcata macar o data prin USB, ca noul partition table sa ajunga pe flash. Dupa aceea se poate folosi upload-ul firmware via web.
 
 ```powershell
 pio run

@@ -10,7 +10,9 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, 
 - La urmatoarea apasare, motorul se opreste controlat, apoi driverul este dezactivat.
 - ESP32-ul creeaza un Access Point WiFi si serveste o aplicatie web la `http://192.168.4.1`.
 - Din aplicatia web se poate porni/opri feederul cu un buton START/STOP.
+- Aplicatia web afiseaza versiunea firmware care ruleaza.
 - Din aplicatia web se pot modifica viteza, acceleratia, ratia reductorului si directia motorului cand feederul este oprit.
+- Din aplicatia web se poate incarca un firmware `.bin` nou si flash-ui in slotul OTA liber, cu confirmare inainte de update.
 - Setarile motorului sunt salvate in flash si sunt reincarcate la pornire.
 - LED-ul onboard clipeste la fiecare 2 secunde doar cat timp feederul este pornit; cand feederul este oprit, LED-ul sta stins.
 
@@ -57,7 +59,7 @@ Versiunea firmware este definita in `src/main.cpp` prin `FW_VERSION`. Aceeasi va
 
 Scriptul `copy_firmware.py` ruleaza automat dupa build prin `extra_scripts = post:copy_firmware.py` din `platformio.ini`. Scriptul citeste `FW_VERSION`, elimina punctele din versiune si copiaza firmware-ul in folderul `release`.
 
-Exemplu: `FW_VERSION "1.0.0"` produce `release/firmware100.bin`.
+Exemplu: `FW_VERSION "1.0.3"` produce `release/firmware103.bin`.
 
 ## WiFi si aplicatia web
 
@@ -89,6 +91,7 @@ Rutele principale sunt:
 | `/status` | GET | Returneaza JSON cu starea feederului |
 | `/settings` | GET | Returneaza setarile salvate ale motorului |
 | `/settings` | POST | Salveaza setarile motorului daca feederul este oprit |
+| `/update` | POST | Incarca si flash-uieste un firmware `.bin` nou daca feederul este oprit |
 | `/toggle` | POST | Comuta feederul intre pornit si oprit |
 | `/start` | POST | Porneste feederul daca era oprit |
 | `/stop` | POST | Opreste feederul daca era pornit |
@@ -180,6 +183,14 @@ Sectiunea de setari din pagina web contine:
 Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint-ul `/settings` refuza si el salvarea cu status `409` daca feederul ruleaza, deci protectia exista si in firmware, nu doar in interfata.
 
 Ratia reductorului este salvata in flash pentru folosire ulterioara. In varianta actuala nu schimba inca formula vitezei motorului; viteza introdusa ramane viteza motorului in pasi pe secunda.
+
+### Update firmware din web UI
+
+Sectiunea **Update firmware** este afisata sub setarile motorului. Utilizatorul alege un fisier `.bin`, apasa `UPDATE FIRMWARE`, apoi confirma intr-un dialog similar cu cel pentru salvarea setarilor.
+
+In firmware, ruta `/update` foloseste biblioteca `Update` din framework-ul ESP32. Upload-ul este scris incremental in slotul OTA liber. Daca update-ul se termina cu succes, raspunsul HTTP este trimis catre browser, apoi ESP32-ul reporneste dupa o mica intarziere.
+
+Sectiunea este dezactivata in interfata cat timp `motorRunning` este `true`, iar endpoint-ul `/update` refuza update-ul cu status `409` daca feederul ruleaza. Inainte de scrierea firmware-ului, iesirile motorului sunt dezactivate.
 
 ## Observatii de review
 
