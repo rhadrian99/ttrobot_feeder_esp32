@@ -5,6 +5,10 @@
 #include <WebServer.h>
 #include <WiFi.h>
 
+#define FW_VERSION "1.0.0"
+
+const char __attribute__((used)) FW_VERSION_TAG[] = "\xFE\xED\xBE\xEF" FW_VERSION;
+
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 2
 #endif
@@ -72,6 +76,15 @@ input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;c
 #saveSettings{margin-top:12px;font-size:16px;padding:13px;background:#f9c74f;color:#101820}
 #settingsBox[disabled]{opacity:.48}
 #settingsMsg{min-height:18px;margin-top:8px;color:#9fb3c8;font-size:12px;text-align:center}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;place-items:center;padding:18px;z-index:5}
+.modal.open{display:grid}
+.modalBox{width:min(360px,100%);border:1px solid #46576a;background:#172330;border-radius:8px;padding:18px;box-shadow:0 18px 45px rgba(0,0,0,.45)}
+.modalBox h2{font-size:19px;color:#f9c74f;margin-bottom:8px;letter-spacing:0}
+.modalBox p{color:#b8c5d1;font-size:14px;line-height:1.35;margin-bottom:14px}
+.modalActions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modalActions button{font-size:15px;padding:12px}
+#cancelSave{background:#314052;color:#f4f0e8}
+#confirmSave{background:#f9c74f;color:#101820}
 </style>
 </head>
 <body>
@@ -108,11 +121,21 @@ input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;c
           <span class="slider"></span>
         </label>
       </div>
-      <button id="saveSettings" type="button" onclick="saveSettings()">SALVEAZA SETARILE</button>
+      <button id="saveSettings" type="button" onclick="askSaveSettings()">SALVEAZA SETARILE</button>
     </fieldset>
     <div id="settingsMsg"></div>
   </section>
 </main>
+<div id="saveModal" class="modal">
+  <div class="modalBox">
+    <h2>Confirmare salvare</h2>
+    <p>Salvezi noile setari ale motorului in memoria flash?</p>
+    <div class="modalActions">
+      <button id="cancelSave" type="button" onclick="closeSaveModal()">ANULEAZA</button>
+      <button id="confirmSave" type="button" onclick="confirmSaveSettings()">SALVEAZA</button>
+    </div>
+  </div>
+</div>
 <script>
 function toggleFeeder(){fetch('/toggle',{method:'POST'}).then(poll).catch(()=>{});}
 function loadSettings(){
@@ -123,8 +146,10 @@ function loadSettings(){
     document.getElementById('reverse').checked=s.reverse;
   }).catch(()=>{});
 }
+function askSaveSettings(){document.getElementById('saveModal').className='modal open';}
+function closeSaveModal(){document.getElementById('saveModal').className='modal';}
+function confirmSaveSettings(){closeSaveModal();saveSettings();}
 function saveSettings(){
-  if(!confirm('Salvezi noile setari ale motorului?'))return;
   const msg=document.getElementById('settingsMsg');
   const body=new URLSearchParams({
     acceleration:document.getElementById('accel').value,

@@ -17,6 +17,7 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, 
 ## Fisiere importante
 
 - `platformio.ini` defineste placa, framework-ul Arduino, viteza seriala si biblioteca `FastAccelStepper`.
+- `copy_firmware.py` copiaza firmware-ul compilat in folderul `release`, cu versiunea in nume.
 - `src/main.cpp` contine tot firmware-ul pentru ESP32.
 - `README.md` contine schema de conectare si comenzile de build/upload.
 
@@ -49,6 +50,14 @@ lib_deps =
 `FastAccelStepper` genereaza impulsurile STEP mai precis decat o bucla manuala cu `delayMicroseconds`, ceea ce ajuta la miscarea mai stabila a motorului.
 
 Bibliotecile `WiFi`, `DNSServer` si `WebServer` vin din framework-ul Arduino pentru ESP32 si sunt folosite pentru Access Point, captive portal si pagina web de control. Biblioteca `Preferences` este folosita pentru salvarea setarilor motorului in flash.
+
+## Versionarea firmware-ului
+
+Versiunea firmware este definita in `src/main.cpp` prin `FW_VERSION`. Aceeasi valoare este inclusa si intr-un tag binar `FW_VERSION_TAG`, marcat cu `__attribute__((used))`, ca sa ramana in imaginea compilata.
+
+Scriptul `copy_firmware.py` ruleaza automat dupa build prin `extra_scripts = post:copy_firmware.py` din `platformio.ini`. Scriptul citeste `FW_VERSION`, elimina punctele din versiune si copiaza firmware-ul in folderul `release`.
+
+Exemplu: `FW_VERSION "1.0.0"` produce `release/firmware100.bin`.
 
 ## WiFi si aplicatia web
 

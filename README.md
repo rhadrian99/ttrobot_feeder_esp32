@@ -69,6 +69,20 @@ Valorile sunt in pasi pe secunda, respectiv pasi pe secunda la patrat. Porneste 
 
 Instaleaza extensia VS Code **PlatformIO IDE** sau PlatformIO CLI. Dupa instalare, redeschide terminalul daca `pio` nu este gasit imediat.
 
+Versiunea firmware este definita in [src/main.cpp](src/main.cpp):
+
+```cpp
+#define FW_VERSION "1.0.0"
+```
+
+La fiecare build, scriptul [copy_firmware.py](copy_firmware.py) copiaza automat binarul compilat in folderul `release`, cu versiunea in nume. De exemplu, versiunea `1.0.0` genereaza:
+
+```text
+release/firmware100.bin
+```
+
+Pentru o versiune noua, modifica `FW_VERSION`, ruleaza build-ul si foloseste binarul nou din `release`.
+
 Proiectul foloseste schema de partitii `min_spiffs.csv`, pregatita pentru OTA: doua sloturi de aplicatie (`ota_0` si `ota_1`) si un SPIFFS mic. Asta permite ca mai tarziu aplicatia web sa primeasca un fisier `.bin` si sa scrie firmware-ul in slotul liber.
 
 Important: dupa schimbarea schemei de partitii, placa trebuie incarcata macar o data prin USB, ca noul partition table sa ajunga pe flash. Dupa aceea putem adauga upload-ul firmware via web.
