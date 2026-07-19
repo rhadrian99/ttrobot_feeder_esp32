@@ -1,0 +1,74 @@
+# ESP32-WROOM NEMA 17 feeder
+
+Proiect PlatformIO pentru ESP32-WROOM / ESP32 DevKit, TMC2208 in mod STEP/DIR si un singur buton start/stop.
+
+Comportamentul este acelasi ca in proiectul ESP32-C3: apasarea butonului fizic porneste motorul, urmatoarea apasare il opreste. Motorul ruleaza continuu inainte pana la oprire.
+
+ESP32-ul porneste si un Access Point WiFi local. Aplicatia web are un buton START/STOP pentru feeder. Cand feederul este pornit, LED-ul onboard clipeste la fiecare 2 secunde. Cand feederul este oprit, LED-ul onboard sta stins.
+
+## Aplicatie web
+
+Dupa upload, conecteaza telefonul sau laptopul la reteaua WiFi creata de ESP32:
+
+```text
+SSID: Feeder_XXXX
+Parola: feeder1234
+Adresa: http://192.168.4.1
+```
+
+Sufixul `XXXX` este generat din identificatorul cipului, ca sa fie mai usor de distins daca ai mai multe placi.
+
+Pagina web include un singur buton START/STOP si afiseaza starea curenta a feederului. Butonul fizic si butonul web controleaza aceeasi stare.
+
+## Conexiuni
+
+| ESP32-WROOM | TMC2208 / buton |
+| --- | --- |
+| GPIO25 | STEP |
+| GPIO26 | DIR |
+| GPIO27 | EN / ENABLE |
+| GPIO14 | Buton catre GND |
+| GND | GND comun cu driverul si sursa motorului |
+
+Butonul foloseste `INPUT_PULLUP`, deci se leaga intre GPIO14 si GND.
+
+Pe ESP32-WROOM nu folosi GPIO6-GPIO11 pentru cablaj extern; aceste pini sunt folositi de memoria flash a modulului. De aceea proiectul portat foloseste GPIO25, GPIO26, GPIO27 si GPIO14 in locul pinilor din varianta ESP32-C3.
+
+## Alimentare
+
+- Alimenteaza motorul din sursa separata potrivita pentru NEMA 17, prin VMOT/GND pe TMC2208.
+- Leaga GND-ul sursei motorului cu GND-ul ESP32-WROOM.
+- Nu alimenta motorul direct din ESP32-WROOM.
+- Regleaza curentul driverului TMC2208 inainte de test, ca sa nu incalzeasca excesiv motorul sau driverul.
+
+## Viteza si acceleratie
+
+Viteza si acceleratia sunt setate in `src/main.cpp` prin:
+
+```cpp
+constexpr uint32_t MotorSpeedStepsPerSecond = 800;
+constexpr uint32_t MotorAccelerationStepsPerSecond2 = 400;
+```
+
+Valorile sunt in pasi pe secunda, respectiv pasi pe secunda la patrat. Porneste conservator, apoi creste treptat in functie de mecanica si de curentul setat pe TMC2208.
+
+## Build si upload
+
+Instaleaza extensia VS Code **PlatformIO IDE** sau PlatformIO CLI. Dupa instalare, redeschide terminalul daca `pio` nu este gasit imediat.
+
+Proiectul foloseste schema de partitii `min_spiffs.csv`, pregatita pentru OTA: doua sloturi de aplicatie (`ota_0` si `ota_1`) si un SPIFFS mic. Asta permite ca mai tarziu aplicatia web sa primeasca un fisier `.bin` si sa scrie firmware-ul in slotul liber.
+
+Important: dupa schimbarea schemei de partitii, placa trebuie incarcata macar o data prin USB, ca noul partition table sa ajunga pe flash. Dupa aceea putem adauga upload-ul firmware via web.
+
+```powershell
+pio run
+pio run --target upload
+pio device monitor
+```
+
+In acest workspace, PlatformIO Core poate fi rulat si asa:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run --target upload
+```
