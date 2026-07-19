@@ -124,6 +124,7 @@ function loadSettings(){
   }).catch(()=>{});
 }
 function saveSettings(){
+  if(!confirm('Salvezi noile setari ale motorului?'))return;
   const msg=document.getElementById('settingsMsg');
   const body=new URLSearchParams({
     acceleration:document.getElementById('accel').value,
