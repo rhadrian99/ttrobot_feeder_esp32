@@ -18,7 +18,20 @@ Adresa: http://192.168.4.1
 
 Sufixul `XXXX` este generat din identificatorul cipului, ca sa fie mai usor de distins daca ai mai multe placi.
 
-Pagina web include un singur buton START/STOP si afiseaza starea curenta a feederului. Butonul fizic si butonul web controleaza aceeasi stare.
+Pagina web include buton START/STOP, afiseaza starea curenta a feederului si are o sectiune de setari pentru motor. Butonul fizic si butonul web controleaza aceeasi stare.
+
+Sectiunea de setari este activa doar cand feederul este oprit. Cand motorul se invarte, campurile sunt blocate ca sa nu se schimbe viteza, acceleratia sau directia in timpul miscarii.
+
+Setarile salvate in flash sunt:
+
+| Setare | Valoare implicita | Rol |
+| --- | --- | --- |
+| Acceleratie | `1000` pasi/s^2 | Acceleratia folosita de `FastAccelStepper` |
+| Viteza | `400` pasi/s | Viteza motorului |
+| Ratie reductor | `1` | Valoare persistenta pentru un reductor montat ulterior |
+| Directie inversata | dezactivat | Schimba sensul de rotatie al motorului |
+
+Aceste valori sunt citite din flash la pornirea ESP32-ului. Daca nu exista inca valori salvate, firmware-ul foloseste valorile implicite.
 
 ## Conexiuni
 
@@ -41,16 +54,16 @@ Pe ESP32-WROOM nu folosi GPIO6-GPIO11 pentru cablaj extern; aceste pini sunt fol
 - Nu alimenta motorul direct din ESP32-WROOM.
 - Regleaza curentul driverului TMC2208 inainte de test, ca sa nu incalzeasca excesiv motorul sau driverul.
 
-## Viteza si acceleratie
+## Viteza, acceleratie si directie
 
-Viteza si acceleratia sunt setate in `src/main.cpp` prin:
+Viteza si acceleratia sunt configurabile din aplicatia web. Valorile implicite din firmware sunt:
 
 ```cpp
-constexpr uint32_t MotorSpeedStepsPerSecond = 800;
-constexpr uint32_t MotorAccelerationStepsPerSecond2 = 400;
+constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
+constexpr uint32_t DefaultMotorAccelerationStepsPerSecond2 = 1000;
 ```
 
-Valorile sunt in pasi pe secunda, respectiv pasi pe secunda la patrat. Porneste conservator, apoi creste treptat in functie de mecanica si de curentul setat pe TMC2208.
+Valorile sunt in pasi pe secunda, respectiv pasi pe secunda la patrat. Porneste conservator, apoi creste treptat in functie de mecanica si de curentul setat pe TMC2208. Directia poate fi inversata din aplicatia web, dar numai cand feederul este oprit.
 
 ## Build si upload
 

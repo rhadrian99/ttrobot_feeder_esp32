@@ -10,6 +10,8 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, 
 - La urmatoarea apasare, motorul se opreste controlat, apoi driverul este dezactivat.
 - ESP32-ul creeaza un Access Point WiFi si serveste o aplicatie web la `http://192.168.4.1`.
 - Din aplicatia web se poate porni/opri feederul cu un buton START/STOP.
+- Din aplicatia web se pot modifica viteza, acceleratia, ratia reductorului si directia motorului cand feederul este oprit.
+- Setarile motorului sunt salvate in flash si sunt reincarcate la pornire.
 - LED-ul onboard clipeste la fiecare 2 secunde doar cat timp feederul este pornit; cand feederul este oprit, LED-ul sta stins.
 
 ## Fisiere importante
@@ -46,7 +48,7 @@ lib_deps =
 
 `FastAccelStepper` genereaza impulsurile STEP mai precis decat o bucla manuala cu `delayMicroseconds`, ceea ce ajuta la miscarea mai stabila a motorului.
 
-Bibliotecile `WiFi`, `DNSServer` si `WebServer` vin din framework-ul Arduino pentru ESP32 si sunt folosite pentru Access Point, captive portal si pagina web de control.
+Bibliotecile `WiFi`, `DNSServer` si `WebServer` vin din framework-ul Arduino pentru ESP32 si sunt folosite pentru Access Point, captive portal si pagina web de control. Biblioteca `Preferences` este folosita pentru salvarea setarilor motorului in flash.
 
 ## WiFi si aplicatia web
 
@@ -76,6 +78,8 @@ Rutele principale sunt:
 | --- | --- | --- |
 | `/` | GET | Serveste aplicatia web |
 | `/status` | GET | Returneaza JSON cu starea feederului |
+| `/settings` | GET | Returneaza setarile salvate ale motorului |
+| `/settings` | POST | Salveaza setarile motorului daca feederul este oprit |
 | `/toggle` | POST | Comuta feederul intre pornit si oprit |
 | `/start` | POST | Porneste feederul daca era oprit |
 | `/stop` | POST | Opreste feederul daca era pornit |
@@ -96,17 +100,30 @@ GPIO6-GPIO11 nu sunt folositi deoarece pe modulele ESP32-WROOM sunt legati de me
 
 ## Cum functioneaza codul
 
-### Constante si pini
+### Constante, pini si setari persistente
 
 In `namespace Pins` sunt definite toate conexiunile hardware. Daca placa nu defineste `LED_BUILTIN`, codul foloseste GPIO2 ca fallback, fiind pinul uzual pentru LED-ul onboard pe multe placi ESP32 DevKit.
 
-Viteza motorului este setata la `800` pasi pe secunda, iar acceleratia la `400` pasi pe secunda la patrat. Debounce-ul butonului este de `35 ms`, iar LED-ul isi schimba starea la fiecare `2000 ms`.
+Valorile implicite pentru motor sunt `400` pasi pe secunda, `1000` pasi pe secunda la patrat si ratie reductor `1`. Acestea sunt folosite doar daca nu exista valori salvate in flash.
+
+La pornire, `loadMotorSettings()` citeste din namespace-ul NVS `feeder` urmatoarele chei:
+
+| Cheie | Variabila | Valoare implicita |
+| --- | --- | --- |
+| `speed` | `motorSpeedStepsPerSecond` | `400` |
+| `accel` | `motorAccelerationStepsPerSecond2` | `1000` |
+| `ratio` | `gearRatio` | `1.0` |
+| `reverse` | `reverseRotation` | `false` |
+
+La salvare, `saveMotorSettings()` scrie aceleasi valori in flash. Valorile sunt limitate intre praguri minime si maxime inainte de aplicare.
+
+Debounce-ul butonului este de `35 ms`, iar LED-ul isi schimba starea la fiecare `2000 ms` cand feederul este pornit.
 
 ### Pornirea si oprirea motorului
 
 Functia `toggleMotor()` inverseaza starea motorului:
 
-- daca motorul era oprit, activeaza iesirile driverului si porneste miscarea inainte cu `runForward()`;
+- daca motorul era oprit, activeaza iesirile driverului si porneste miscarea cu `runForward()` sau `runBackward()`, in functie de setarea de directie;
 - daca motorul era pornit, cere oprirea cu `stopMove()` si marcheaza driverul pentru dezactivare dupa ce motorul chiar s-a oprit.
 
 Dezactivarea driverului dupa oprire este gestionata de `updateMotorEnable()`. Asta evita taierea brusca a iesirilor inainte ca libraria sa termine oprirea miscarii.
@@ -141,6 +158,19 @@ server.handleClient();
 ```
 
 Aceasta structura este buna pentru firmware simplu deoarece fiecare functie face putin lucru si revine imediat.
+
+### Setarile din web UI
+
+Sectiunea de setari din pagina web contine:
+
+- acceleratia motorului, implicit `1000` pasi/s^2;
+- viteza motorului, implicit `400` pasi/s;
+- ratia reductorului, implicit `1`;
+- un switch pentru inversarea directiei de rotatie.
+
+Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint-ul `/settings` refuza si el salvarea cu status `409` daca feederul ruleaza, deci protectia exista si in firmware, nu doar in interfata.
+
+Ratia reductorului este salvata in flash pentru folosire ulterioara. In varianta actuala nu schimba inca formula vitezei motorului; viteza introdusa ramane viteza motorului in pasi pe secunda.
 
 ## Observatii de review
 

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <DNSServer.h>
 #include <FastAccelStepper.h>
+#include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -17,12 +18,19 @@ constexpr uint8_t StatusLed = LED_BUILTIN;
 }  // namespace Pins
 
 constexpr bool EnableActiveLevel = LOW;
-constexpr uint32_t MotorSpeedStepsPerSecond = 800;
-constexpr uint32_t MotorAccelerationStepsPerSecond2 = 400;
+constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
+constexpr uint32_t DefaultMotorAccelerationStepsPerSecond2 = 1000;
+constexpr float DefaultGearRatio = 1.0f;
 constexpr uint32_t DebounceMillis = 35;
 constexpr uint32_t StatusLedBlinkMillis = 2000;
 constexpr uint32_t WifiHealthCheckMillis = 5000;
 constexpr byte DnsPort = 53;
+constexpr uint32_t MinMotorSpeedStepsPerSecond = 1;
+constexpr uint32_t MaxMotorSpeedStepsPerSecond = 20000;
+constexpr uint32_t MinMotorAccelerationStepsPerSecond2 = 1;
+constexpr uint32_t MaxMotorAccelerationStepsPerSecond2 = 50000;
+constexpr float MinGearRatio = 0.01f;
+constexpr float MaxGearRatio = 100.0f;
 
 const char WifiPassword[] = "feeder1234";
 const IPAddress ApIp(192, 168, 4, 1);
@@ -49,6 +57,21 @@ button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-we
 button.off{background:#f94144;color:#fff}
 .meta{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;color:#b8c5d1;font-size:12px}
 .meta div{border:1px solid #314052;border-radius:8px;padding:10px;background:#111b25}
+.settings{margin-top:14px;border:1px solid #314052;background:#111b25;border-radius:8px;padding:14px}
+.settings h2{font-size:18px;color:#f9c74f;margin-bottom:10px;letter-spacing:0}
+.grid{display:grid;gap:10px}
+label{display:grid;gap:5px;color:#b8c5d1;font-size:12px}
+input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;color:#f4f0e8;padding:11px;font-size:16px}
+.switchRow{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#b8c5d1;font-size:12px;margin-top:10px}
+.switch{position:relative;display:inline-block;width:54px;height:30px;flex:0 0 auto}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;inset:0;background:#314052;border-radius:999px;transition:.2s}
+.slider:before{content:"";position:absolute;width:24px;height:24px;left:3px;bottom:3px;background:#f4f0e8;border-radius:50%;transition:.2s}
+.switch input:checked+.slider{background:#f94144}
+.switch input:checked+.slider:before{transform:translateX(24px)}
+#saveSettings{margin-top:12px;font-size:16px;padding:13px;background:#f9c74f;color:#101820}
+#settingsBox[disabled]{opacity:.48}
+#settingsMsg{min-height:18px;margin-top:8px;color:#9fb3c8;font-size:12px;text-align:center}
 </style>
 </head>
 <body>
@@ -64,22 +87,70 @@ button.off{background:#f94144;color:#fff}
     <div>Clienti WiFi<br><strong id="clients">0</strong></div>
     <div>IP<br><strong id="ip">192.168.4.1</strong></div>
   </div>
+  <section class="settings">
+    <h2>Setari motor</h2>
+    <fieldset id="settingsBox">
+      <div class="grid">
+        <label>Acceleratie (pasi/s^2)
+          <input id="accel" type="number" min="1" max="50000" step="1" value="1000">
+        </label>
+        <label>Viteza (pasi/s)
+          <input id="speed" type="number" min="1" max="20000" step="1" value="400">
+        </label>
+        <label>Ratie reductor
+          <input id="ratio" type="number" min="0.01" max="100" step="0.01" value="1">
+        </label>
+      </div>
+      <div class="switchRow">
+        <span>Schimba directia de rotatie</span>
+        <label class="switch">
+          <input id="reverse" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button id="saveSettings" type="button" onclick="saveSettings()">SALVEAZA SETARILE</button>
+    </fieldset>
+    <div id="settingsMsg"></div>
+  </section>
 </main>
 <script>
 function toggleFeeder(){fetch('/toggle',{method:'POST'}).then(poll).catch(()=>{});}
+function loadSettings(){
+  fetch('/settings').then(r=>r.json()).then(s=>{
+    document.getElementById('accel').value=s.acceleration;
+    document.getElementById('speed').value=s.speed;
+    document.getElementById('ratio').value=s.gearRatio;
+    document.getElementById('reverse').checked=s.reverse;
+  }).catch(()=>{});
+}
+function saveSettings(){
+  const msg=document.getElementById('settingsMsg');
+  const body=new URLSearchParams({
+    acceleration:document.getElementById('accel').value,
+    speed:document.getElementById('speed').value,
+    gearRatio:document.getElementById('ratio').value,
+    reverse:document.getElementById('reverse').checked?'1':'0'
+  });
+  fetch('/settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
+    .then(r=>{if(!r.ok)throw new Error(r.status===409?'Opreste feederul inainte de modificari':'Eroare salvare');return r.json();})
+    .then(s=>{msg.textContent='Setari salvate';document.getElementById('accel').value=s.acceleration;document.getElementById('speed').value=s.speed;document.getElementById('ratio').value=s.gearRatio;document.getElementById('reverse').checked=s.reverse;})
+    .catch(e=>msg.textContent=e.message);
+}
 function poll(){
   fetch('/status').then(r=>r.json()).then(d=>{
     const state=document.getElementById('state');
     const btn=document.getElementById('toggleBtn');
+    const settings=document.getElementById('settingsBox');
     state.textContent=d.running?'PORNIT':'OPRIT';
     state.className=d.running?'':'off';
     btn.textContent=d.running?'STOP':'START';
     btn.className=d.running?'off':'';
+    settings.disabled=d.running;
     document.getElementById('clients').textContent=d.clients;
     document.getElementById('ip').textContent=d.ip;
   }).catch(()=>{});
 }
-setInterval(poll,1000);poll();
+setInterval(poll,1000);loadSettings();poll();
 </script>
 </body>
 </html>
@@ -89,8 +160,14 @@ FastAccelStepperEngine engine;
 FastAccelStepper *stepper = nullptr;
 WebServer server(80);
 DNSServer dnsServer;
+Preferences preferences;
 
 String uniqueSsid = "Feeder";
+
+uint32_t motorSpeedStepsPerSecond = DefaultMotorSpeedStepsPerSecond;
+uint32_t motorAccelerationStepsPerSecond2 = DefaultMotorAccelerationStepsPerSecond2;
+float gearRatio = DefaultGearRatio;
+bool reverseRotation = false;
 
 bool motorRunning = false;
 bool disableMotorWhenStopped = false;
@@ -103,6 +180,47 @@ uint32_t lastStatusLedToggleMillis = 0;
 uint32_t lastWifiCheckMillis = 0;
 
 void toggleMotor();
+
+float constrainFloat(float value, float minimum, float maximum) {
+  if (value < minimum) {
+    return minimum;
+  }
+  if (value > maximum) {
+    return maximum;
+  }
+  return value;
+}
+
+void applyMotorSettings() {
+  if (stepper == nullptr) {
+    return;
+  }
+
+  stepper->setSpeedInHz(motorSpeedStepsPerSecond);
+  stepper->setAcceleration(motorAccelerationStepsPerSecond2);
+}
+
+void loadMotorSettings() {
+  preferences.begin("feeder", true);
+  motorSpeedStepsPerSecond = preferences.getUInt("speed", DefaultMotorSpeedStepsPerSecond);
+  motorAccelerationStepsPerSecond2 = preferences.getUInt("accel", DefaultMotorAccelerationStepsPerSecond2);
+  gearRatio = preferences.getFloat("ratio", DefaultGearRatio);
+  reverseRotation = preferences.getBool("reverse", false);
+  preferences.end();
+
+  motorSpeedStepsPerSecond = constrain(motorSpeedStepsPerSecond, MinMotorSpeedStepsPerSecond, MaxMotorSpeedStepsPerSecond);
+  motorAccelerationStepsPerSecond2 = constrain(motorAccelerationStepsPerSecond2, MinMotorAccelerationStepsPerSecond2, MaxMotorAccelerationStepsPerSecond2);
+  gearRatio = constrainFloat(gearRatio, MinGearRatio, MaxGearRatio);
+}
+
+void saveMotorSettings() {
+  preferences.begin("feeder", false);
+  preferences.putUInt("speed", motorSpeedStepsPerSecond);
+  preferences.putUInt("accel", motorAccelerationStepsPerSecond2);
+  preferences.putFloat("ratio", gearRatio);
+  preferences.putBool("reverse", reverseRotation);
+  preferences.end();
+}
 
 void formatIpAddress(char *buffer, size_t bufferSize, IPAddress ip) {
   snprintf(buffer, bufferSize, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
@@ -191,6 +309,53 @@ void handleStatus() {
   server.send(200, "application/json", json);
 }
 
+void sendSettings() {
+  char json[160];
+  snprintf(
+    json,
+    sizeof(json),
+    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s}",
+    static_cast<unsigned long>(motorSpeedStepsPerSecond),
+    static_cast<unsigned long>(motorAccelerationStepsPerSecond2),
+    gearRatio,
+    reverseRotation ? "true" : "false"
+  );
+  server.send(200, "application/json", json);
+}
+
+void handleGetSettings() {
+  sendSettings();
+}
+
+void handlePostSettings() {
+  if (motorRunning) {
+    server.send(409, "text/plain", "Feederul trebuie oprit inainte de modificarea setarilor");
+    return;
+  }
+
+  if (!server.hasArg("speed") || !server.hasArg("acceleration") || !server.hasArg("gearRatio") || !server.hasArg("reverse")) {
+    server.send(400, "text/plain", "Lipsesc setari");
+    return;
+  }
+
+  motorSpeedStepsPerSecond = constrain(
+    static_cast<uint32_t>(server.arg("speed").toInt()),
+    MinMotorSpeedStepsPerSecond,
+    MaxMotorSpeedStepsPerSecond
+  );
+  motorAccelerationStepsPerSecond2 = constrain(
+    static_cast<uint32_t>(server.arg("acceleration").toInt()),
+    MinMotorAccelerationStepsPerSecond2,
+    MaxMotorAccelerationStepsPerSecond2
+  );
+  gearRatio = constrainFloat(server.arg("gearRatio").toFloat(), MinGearRatio, MaxGearRatio);
+  reverseRotation = server.arg("reverse") == "1";
+
+  saveMotorSettings();
+  applyMotorSettings();
+  sendSettings();
+}
+
 void handleToggle() {
   toggleMotor();
   server.send(200, "text/plain", "OK");
@@ -219,6 +384,8 @@ void setupWebServer() {
   server.on("/connecttest.txt", HTTP_GET, handleCaptivePortal);
   server.on("/fwlink", HTTP_GET, handleCaptivePortal);
   server.on("/status", HTTP_GET, handleStatus);
+  server.on("/settings", HTTP_GET, handleGetSettings);
+  server.on("/settings", HTTP_POST, handlePostSettings);
   server.on("/toggle", HTTP_POST, handleToggle);
   server.on("/start", HTTP_POST, handleStart);
   server.on("/stop", HTTP_POST, handleStop);
@@ -252,7 +419,11 @@ void toggleMotor() {
   if (motorRunning) {
     disableMotorWhenStopped = false;
     setMotorEnabled(true);
-    stepper->runForward();
+    if (reverseRotation) {
+      stepper->runBackward();
+    } else {
+      stepper->runForward();
+    }
   } else {
     stepper->stopMove();
     disableMotorWhenStopped = true;
@@ -306,6 +477,7 @@ void updateStatusLed() {
 
 void setup() {
   Serial.begin(115200);
+  loadMotorSettings();
   WiFi.onEvent(onWiFiEvent);
   generateUniqueSsid();
 
@@ -325,8 +497,7 @@ void setup() {
     stepper->setDirectionPin(Pins::Dir);
     stepper->setEnablePin(Pins::Enable, EnableActiveLevel == LOW);
     stepper->setAutoEnable(false);
-    stepper->setSpeedInHz(MotorSpeedStepsPerSecond);
-    stepper->setAcceleration(MotorAccelerationStepsPerSecond2);
+    applyMotorSettings();
     setMotorEnabled(false);
   } else {
     Serial.println("Eroare: nu pot conecta pinul STEP la FastAccelStepper");
