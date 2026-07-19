@@ -8,7 +8,8 @@
 
 #define FW_VERSION "1.0.3"
 
-const char __attribute__((used)) FW_VERSION_TAG[] = "\xFE\xED\xBE\xEF" FW_VERSION;
+const char FirmwareIdentityPrefix[] = "TTROBOT_FEEDER_ESP32_FW:";
+const char __attribute__((used)) FirmwareIdentity[] = "TTROBOT_FEEDER_ESP32_FW:" FW_VERSION;
 
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 2
@@ -36,6 +37,7 @@ constexpr uint32_t MinMotorAccelerationStepsPerSecond2 = 1;
 constexpr uint32_t MaxMotorAccelerationStepsPerSecond2 = 50000;
 constexpr float MinGearRatio = 0.01f;
 constexpr float MaxGearRatio = 100.0f;
+constexpr size_t FirmwareValidationMaxBytes = 32768;
 
 const char WifiPassword[] = "feeder1234";
 const IPAddress ApIp(192, 168, 4, 1);
@@ -192,7 +194,7 @@ function uploadFirmware(){
   body.append('firmware',file,file.name);
   msg.textContent='Se incarca firmware-ul...';
   fetch('/update',{method:'POST',body})
-    .then(r=>{if(!r.ok)throw new Error(r.status===409?'Opreste feederul inainte de update':'Update esuat');return r.text();})
+    .then(r=>{if(!r.ok)return r.text().then(t=>{throw new Error(t||'Update esuat');});return r.text();})
     .then(t=>{msg.textContent=t;})
     .catch(e=>{msg.textContent=e.message;});
 }
@@ -252,14 +254,87 @@ bool statusLedState = LOW;
 bool wifiApReady = false;
 bool firmwareUpdateStarted = false;
 bool firmwareUpdateFailed = false;
+bool firmwareUpdateValidated = false;
+bool firmwareUpdateWriteStarted = false;
 bool restartPending = false;
 uint32_t lastDebounceChangeMillis = 0;
 uint32_t lastStatusLedToggleMillis = 0;
 uint32_t lastWifiCheckMillis = 0;
 uint32_t restartAtMillis = 0;
+uint8_t *firmwareProbeBuffer = nullptr;
+size_t firmwareProbeSize = 0;
+const char *firmwareUpdateError = nullptr;
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
+
+void releaseFirmwareProbeBuffer() {
+  if (firmwareProbeBuffer != nullptr) {
+    free(firmwareProbeBuffer);
+    firmwareProbeBuffer = nullptr;
+  }
+  firmwareProbeSize = 0;
+}
+
+void failFirmwareUpdate(const char *message) {
+  firmwareUpdateFailed = true;
+  firmwareUpdateError = message;
+  if (firmwareUpdateWriteStarted) {
+    Update.abort();
+  }
+}
+
+bool bufferContains(const uint8_t *buffer, size_t bufferSize, const char *needle) {
+  const size_t needleSize = strlen(needle);
+  if (needleSize == 0 || bufferSize < needleSize) {
+    return false;
+  }
+
+  for (size_t offset = 0; offset <= bufferSize - needleSize; offset++) {
+    if (memcmp(buffer + offset, needle, needleSize) == 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool beginValidatedFirmwareUpdate() {
+  if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+    failFirmwareUpdate("Nu pot porni scrierea OTA");
+    Update.printError(Serial);
+    return false;
+  }
+
+  firmwareUpdateWriteStarted = true;
+  if (Update.write(firmwareProbeBuffer, firmwareProbeSize) != firmwareProbeSize) {
+    failFirmwareUpdate("Eroare la scrierea firmware-ului");
+    Update.printError(Serial);
+    return false;
+  }
+
+  firmwareUpdateValidated = true;
+  releaseFirmwareProbeBuffer();
+  return true;
+}
+
+void probeFirmwareChunk(const uint8_t *buffer, size_t size) {
+  if (firmwareUpdateFailed || firmwareUpdateValidated) {
+    return;
+  }
+
+  if (firmwareProbeBuffer == nullptr || firmwareProbeSize + size > FirmwareValidationMaxBytes) {
+    failFirmwareUpdate("Firmware incompatibil: marker proiect lipsa");
+    return;
+  }
+
+  memcpy(firmwareProbeBuffer + firmwareProbeSize, buffer, size);
+  firmwareProbeSize += size;
+
+  if (bufferContains(firmwareProbeBuffer, firmwareProbeSize, FirmwareIdentityPrefix)) {
+    beginValidatedFirmwareUpdate();
+  }
+}
 
 float constrainFloat(float value, float minimum, float maximum) {
   if (value < minimum) {
@@ -377,15 +452,16 @@ void handleStatus() {
   char ipBuffer[16];
   formatIpAddress(ipBuffer, sizeof(ipBuffer), WiFi.softAPIP());
 
-  char json[160];
+  char json[220];
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\"}",
+    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"identity\":\"%s\"}",
     motorRunning ? "true" : "false",
     WiFi.softAPgetStationNum(),
     ipBuffer,
-    FW_VERSION
+    FW_VERSION,
+    FirmwareIdentity
   );
   server.send(200, "application/json", json);
 }
@@ -460,36 +536,47 @@ void handleFirmwareUpdateUpload() {
   HTTPUpload &upload = server.upload();
 
   if (motorRunning) {
-    firmwareUpdateFailed = true;
+    failFirmwareUpdate("Opreste feederul inainte de update firmware");
     return;
   }
 
   if (upload.status == UPLOAD_FILE_START) {
     firmwareUpdateStarted = true;
     firmwareUpdateFailed = false;
+    firmwareUpdateValidated = false;
+    firmwareUpdateWriteStarted = false;
+    firmwareUpdateError = nullptr;
     disableMotorWhenStopped = false;
+    releaseFirmwareProbeBuffer();
+    firmwareProbeBuffer = static_cast<uint8_t *>(malloc(FirmwareValidationMaxBytes));
     setMotorEnabled(false);
     Serial.printf("[OTA] Start update: %s\n", upload.filename.c_str());
 
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-      firmwareUpdateFailed = true;
-      Update.printError(Serial);
+    if (firmwareProbeBuffer == nullptr) {
+      failFirmwareUpdate("Memorie insuficienta pentru validarea firmware-ului");
     }
   } else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (!firmwareUpdateFailed && Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-      firmwareUpdateFailed = true;
+    if (!firmwareUpdateFailed && !firmwareUpdateValidated) {
+      probeFirmwareChunk(upload.buf, upload.currentSize);
+    } else if (!firmwareUpdateFailed && Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      failFirmwareUpdate("Eroare la scrierea firmware-ului");
       Update.printError(Serial);
     }
   } else if (upload.status == UPLOAD_FILE_END) {
+    if (!firmwareUpdateFailed && !firmwareUpdateValidated) {
+      failFirmwareUpdate("Firmware incompatibil: marker proiect lipsa");
+    }
+
     if (!firmwareUpdateFailed && Update.end(true)) {
       Serial.printf("[OTA] Update complet: %u bytes\n", upload.totalSize);
-    } else {
-      firmwareUpdateFailed = true;
+    } else if (!firmwareUpdateFailed) {
+      failFirmwareUpdate("Update firmware esuat");
       Update.printError(Serial);
     }
+    releaseFirmwareProbeBuffer();
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
-    firmwareUpdateFailed = true;
-    Update.abort();
+    failFirmwareUpdate("Update firmware anulat");
+    releaseFirmwareProbeBuffer();
     Serial.println("[OTA] Update anulat");
   }
 }
@@ -501,7 +588,7 @@ void handleFirmwareUpdateResult() {
   }
 
   if (firmwareUpdateFailed || Update.hasError()) {
-    server.send(500, "text/plain", "Update firmware esuat");
+    server.send(500, "text/plain", firmwareUpdateError != nullptr ? firmwareUpdateError : "Update firmware esuat");
     return;
   }
 

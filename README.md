@@ -33,7 +33,7 @@ Setarile salvate in flash sunt:
 
 Aceste valori sunt citite din flash la pornirea ESP32-ului. Daca nu exista inca valori salvate, firmware-ul foloseste valorile implicite.
 
-Sub setarile motorului exista sectiunea **Update firmware**. Alege un fisier `.bin`, apasa `UPDATE FIRMWARE`, confirma dialogul, iar ESP32-ul incarca firmware-ul in slotul OTA liber si reporneste dupa update. Update-ul este blocat cat timp feederul ruleaza.
+Sub setarile motorului exista sectiunea **Update firmware**. Alege un fisier `.bin`, apasa `UPDATE FIRMWARE`, confirma dialogul, iar ESP32-ul incarca firmware-ul in slotul OTA liber si reporneste dupa update. Update-ul este blocat cat timp feederul ruleaza. Firmware-ul incarcat trebuie sa contina markerul proiectului `TTROBOT_FEEDER_ESP32_FW:`, altfel este respins inainte de scrierea in flash.
 
 ## Conexiuni
 
@@ -85,7 +85,7 @@ release/firmware103.bin
 
 Pentru o versiune noua, modifica `FW_VERSION`, ruleaza build-ul si foloseste binarul nou din `release`.
 
-Proiectul foloseste schema de partitii `min_spiffs.csv`, pregatita pentru OTA: doua sloturi de aplicatie (`ota_0` si `ota_1`) si un SPIFFS mic. Aplicatia web poate primi un fisier `.bin` si il poate scrie in slotul liber.
+Proiectul foloseste schema de partitii `min_spiffs.csv`, pregatita pentru OTA: doua sloturi de aplicatie (`ota_0` si `ota_1`) si un SPIFFS mic. Aplicatia web poate primi un fisier `.bin` si il poate scrie in slotul liber dupa ce firmware-ul trece validarea markerului de proiect.
 
 Important: dupa schimbarea schemei de partitii, placa trebuie incarcata macar o data prin USB, ca noul partition table sa ajunga pe flash. Dupa aceea se poate folosi upload-ul firmware via web.
 

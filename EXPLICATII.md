@@ -188,7 +188,7 @@ Ratia reductorului este salvata in flash pentru folosire ulterioara. In varianta
 
 Sectiunea **Update firmware** este afisata sub setarile motorului. Utilizatorul alege un fisier `.bin`, apasa `UPDATE FIRMWARE`, apoi confirma intr-un dialog similar cu cel pentru salvarea setarilor.
 
-In firmware, ruta `/update` foloseste biblioteca `Update` din framework-ul ESP32. Upload-ul este scris incremental in slotul OTA liber. Daca update-ul se termina cu succes, raspunsul HTTP este trimis catre browser, apoi ESP32-ul reporneste dupa o mica intarziere.
+In firmware, ruta `/update` foloseste biblioteca `Update` din framework-ul ESP32. Inainte de `Update.begin()`, firmware-ul pastreaza inceputul upload-ului in RAM si cauta markerul `TTROBOT_FEEDER_ESP32_FW:`. Daca markerul nu apare in primii 32 KB, upload-ul este respins fara sa fie scris in flash. Dupa validare, upload-ul este scris incremental in slotul OTA liber. Daca update-ul se termina cu succes, raspunsul HTTP este trimis catre browser, apoi ESP32-ul reporneste dupa o mica intarziere.
 
 Sectiunea este dezactivata in interfata cat timp `motorRunning` este `true`, iar endpoint-ul `/update` refuza update-ul cu status `409` daca feederul ruleaza. Inainte de scrierea firmware-ului, iesirile motorului sunt dezactivate.
 
