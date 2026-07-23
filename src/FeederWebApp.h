@@ -4,6 +4,8 @@
 #include <DNSServer.h>
 #include <WebServer.h>
 
+#include "board_config.h"
+
 class FeederWebApp {
  public:
   struct Dependencies {
@@ -38,7 +40,7 @@ class FeederWebApp {
   static constexpr const char *kWifiPassword = "feeder1234";
   static const IPAddress kApIp;
   static const IPAddress kApSubnet;
-  static constexpr const char *kFirmwareIdentityPrefix = "TTROBOT_FEEDER_ESP32_FW:";
+  static constexpr const char *kFirmwareIdentityPrefix = FirmwareIdentityPrefix;
 
   Dependencies deps_;
   String uniqueSsid_ = "Feeder";

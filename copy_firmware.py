@@ -26,11 +26,12 @@ def copy_firmware(source, target, env):
         print(f"[POST-BUILD] ERROR reading {main_cpp}: {error}")
 
     suffix = re.sub(r"\.", "", version)
+    label = env["PIOENV"].replace("esp32-", "")
 
     if os.path.exists(firmware_src):
-        destination = os.path.join(release_dir, f"firmware{suffix}.bin")
+        destination = os.path.join(release_dir, f"firmware{suffix}_{label}.bin")
         shutil.copy(firmware_src, destination)
-        print(f"[POST-BUILD] Firmware copied -> release/firmware{suffix}.bin (v{version})")
+        print(f"[POST-BUILD] Firmware copied -> release/firmware{suffix}_{label}.bin (v{version})")
     else:
         print(f"[POST-BUILD] ERROR: Source firmware not found at {firmware_src}")
 

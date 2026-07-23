@@ -3,20 +3,9 @@
 #include <Preferences.h>
 
 #include "FeederWebApp.h"
+#include "board_config.h"
 
 #define FW_VERSION "1.0.3"
-
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 2
-#endif
-
-namespace Pins {
-constexpr uint8_t Step = 25;
-constexpr uint8_t Dir = 26;
-constexpr uint8_t Enable = 27;
-constexpr uint8_t Button = 14;
-constexpr uint8_t StatusLed = LED_BUILTIN;
-}  // namespace Pins
 
 constexpr bool EnableActiveLevel = LOW;
 constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
@@ -53,6 +42,7 @@ void toggleMotor();
 void applyMotorSettings();
 void loadMotorSettings();
 void saveMotorSettings();
+void writeStatusLed(bool on);
 float constrainFloat(float value, float minimum, float maximum);
 
 FeederWebApp::Dependencies buildWebDependencies() {
@@ -177,11 +167,15 @@ void updateButton() {
   }
 }
 
+void writeStatusLed(bool on) {
+  digitalWrite(Pins::StatusLed, on ? StatusLedActiveLevel : !StatusLedActiveLevel);
+}
+
 void updateStatusLed() {
   if (!motorRunning) {
-    if (statusLedState != LOW) {
-      statusLedState = LOW;
-      digitalWrite(Pins::StatusLed, statusLedState);
+    if (statusLedState) {
+      statusLedState = false;
+      writeStatusLed(false);
     }
     return;
   }
@@ -191,7 +185,7 @@ void updateStatusLed() {
   if (now - lastStatusLedToggleMillis >= StatusLedBlinkMillis) {
     lastStatusLedToggleMillis = now;
     statusLedState = !statusLedState;
-    digitalWrite(Pins::StatusLed, statusLedState);
+    writeStatusLed(statusLedState);
   }
 }
 
@@ -206,7 +200,8 @@ void setup() {
   pinMode(Pins::StatusLed, OUTPUT);
 
   digitalWrite(Pins::Step, LOW);
-  digitalWrite(Pins::StatusLed, statusLedState);
+  statusLedState = false;
+  writeStatusLed(false);
   setMotorEnabled(false);
 
   engine.init();
@@ -223,7 +218,8 @@ void setup() {
 
   webApp.begin();
 
-  Serial.println("ESP32-WROOM feeder gata. Apasa butonul pentru start/stop.");
+  Serial.print(BoardName);
+  Serial.println(" feeder gata. Apasa butonul pentru start/stop.");
 }
 
 void loop() {
