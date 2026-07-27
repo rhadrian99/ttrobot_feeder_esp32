@@ -63,6 +63,7 @@ class FeederWebApp {
   bool ensureAccessPoint(bool forceRestart = false);
   void generateUniqueSsid();
   void onRoot();
+  void onSettingsPage();
   void onCaptivePortal();
   void onStatus();
   void onGetSettings();

@@ -8,8 +8,8 @@
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
 
 namespace Pins {
-constexpr uint8_t Step = 6;
-constexpr uint8_t Dir = 7;
+constexpr uint8_t Step = 7;
+constexpr uint8_t Dir = 6;
 constexpr uint8_t Enable = 10;
 constexpr uint8_t Button = 5;
 constexpr uint8_t StatusLed = 8;

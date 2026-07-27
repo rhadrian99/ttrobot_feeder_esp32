@@ -36,12 +36,115 @@ h1{font-size:26px;text-align:center;margin-bottom:8px;color:#f9c74f;letter-spaci
 .label{font-size:12px;color:#8ea4ba;margin-bottom:6px;text-transform:uppercase}
 #state{font-size:34px;font-weight:700;color:#90be6d}
 #state.off{color:#f94144}
-button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-weight:700;color:#101820;background:#90be6d;cursor:pointer;touch-action:manipulation}
+button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-weight:700;color:#101820;background:#90be6d;cursor:pointer;touch-action:manipulation;margin-top:10px}
 button.off{background:#f94144;color:#fff}
+button.secondary{background:#5a7c99;color:#f4f0e8;font-size:16px}
+button:disabled{opacity:.48;cursor:not-allowed}
 .meta{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;color:#b8c5d1;font-size:12px}
 .meta div{border:1px solid #314052;border-radius:8px;padding:10px;background:#111b25}
 .meta .wide{grid-column:1/-1}
-.settings{margin-top:14px;border:1px solid #314052;background:#111b25;border-radius:8px;padding:14px}
+.actions{margin-top:20px;border:1px solid #314052;background:#111b25;border-radius:8px;padding:14px}
+.actions button{margin-top:0;background:#5a7c99;color:#f4f0e8;font-size:16px}
+</style>
+</head>
+<body>
+<main class="panel">
+  <h1 id="appTitle">ESP32 Feeder</h1>
+  <div class="sub">Access Point local: http://192.168.4.1</div>
+  <section class="status">
+    <div class="label">Stare feeder</div>
+    <div id="state" class="off">OPRIT</div>
+  </section>
+  <button id="toggleBtn" onclick="toggleFeeder()">START</button>
+  <div class="meta">
+    <div>Clienti WiFi<br><strong id="clients">0</strong></div>
+    <div>IP<br><strong id="ip">192.168.4.1</strong></div>
+  </div>
+  <section class="actions">
+    <button class="secondary" onclick="window.location.href='/settings-page'">SETARI</button>
+  </section>
+</main>
+<script>
+const AudioContext=window.AudioContext||window.webkitAudioContext;
+let audioCtx=null;
+function initAudio(){if(!audioCtx){audioCtx=new AudioContext();}}
+function playClick(){
+  initAudio();
+  if(!audioCtx)return;
+  const t=audioCtx.currentTime;
+  const osc=audioCtx.createOscillator();
+  const gain=audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.frequency.value=800;
+  osc.type='sine';
+  gain.gain.setValueAtTime(0.1,t);
+  gain.gain.exponentialRampToValueAtTime(0.01,t+0.1);
+  osc.start(t);
+  osc.stop(t+0.1);
+}
+function playSuccess(){
+  initAudio();
+  if(!audioCtx)return;
+  const t=audioCtx.currentTime;
+  for(let i=0;i<2;i++){
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.value=900+i*200;
+    osc.type='sine';
+    const start=t+i*0.15;
+    gain.gain.setValueAtTime(0.1,start);
+    gain.gain.exponentialRampToValueAtTime(0.01,start+0.1);
+    osc.start(start);
+    osc.stop(start+0.1);
+  }
+}
+function toggleFeeder(){playClick();fetch('/toggle',{method:'POST'}).then(poll).catch(()=>{});}
+function poll(){
+  fetch('/status').then(r=>r.json()).then(d=>{
+    const state=document.getElementById('state');
+    const btn=document.getElementById('toggleBtn');
+    const settingsBtn=document.querySelector('.actions button');
+    state.textContent=d.running?'PORNIT':'OPRIT';
+    state.className=d.running?'':'off';
+    btn.textContent=d.running?'STOP':'START';
+    btn.className=d.running?'off':'';
+    settingsBtn.disabled=d.running;
+    document.getElementById('clients').textContent=d.clients;
+    document.getElementById('ip').textContent=d.ip;
+    document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
+  }).catch(()=>{});
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  const settingsBtn=document.querySelector('.actions button');
+  if(settingsBtn){
+    settingsBtn.addEventListener('click',playClick);
+  }
+});
+setInterval(poll,1000);poll();
+</script>
+</body>
+</html>
+)rawliteral";
+
+const char SettingsHtml[] = R"rawliteral(
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 Feeder - Setari</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;font-family:Verdana,Geneva,sans-serif;background:#101820;color:#f4f0e8;display:grid;place-items:center;padding:18px}
+.panel{width:min(430px,100%);border:1px solid #314052;background:#172330;border-radius:8px;padding:20px;box-shadow:0 18px 45px rgba(0,0,0,.35)}
+h1{font-size:26px;text-align:center;margin-bottom:8px;color:#f9c74f;letter-spacing:0}
+.sub{text-align:center;color:#9fb3c8;font-size:13px;margin-bottom:18px}
+button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-weight:700;color:#101820;background:#90be6d;cursor:pointer;touch-action:manipulation}
+button.back{background:#5a7c99;color:#f4f0e8;font-size:16px;margin-bottom:14px}
+.settings{border:1px solid #314052;background:#111b25;border-radius:8px;padding:14px;margin-bottom:14px}
 .settings h2{font-size:18px;color:#f9c74f;margin-bottom:10px;letter-spacing:0}
 .grid{display:grid;gap:10px}
 label{display:grid;gap:5px;color:#b8c5d1;font-size:12px}
@@ -74,17 +177,8 @@ input[type=file]{font-size:13px;color:#b8c5d1}
 </head>
 <body>
 <main class="panel">
-  <h1 id="appTitle">ESP32 Feeder</h1>
-  <div class="sub">Access Point local: http://192.168.4.1</div>
-  <section class="status">
-    <div class="label">Stare feeder</div>
-    <div id="state" class="off">OPRIT</div>
-  </section>
-  <button id="toggleBtn" onclick="toggleFeeder()">START</button>
-  <div class="meta">
-    <div>Clienti WiFi<br><strong id="clients">0</strong></div>
-    <div>IP<br><strong id="ip">192.168.4.1</strong></div>
-  </div>
+  <h1>ESP32 Feeder - Setari</h1>
+  <button class="back" onclick="window.location.href='/'">← INAPOI</button>
   <section class="settings">
     <h2>Setari motor</h2>
     <fieldset id="settingsBox">
@@ -142,22 +236,59 @@ input[type=file]{font-size:13px;color:#b8c5d1}
   </div>
 </div>
 <script>
-function toggleFeeder(){fetch('/toggle',{method:'POST'}).then(poll).catch(()=>{});}
+const AudioContext=window.AudioContext||window.webkitAudioContext;
+let audioCtx=null;
+function initAudio(){if(!audioCtx){audioCtx=new AudioContext();}}
+function playClick(){
+  initAudio();
+  if(!audioCtx)return;
+  const t=audioCtx.currentTime;
+  const osc=audioCtx.createOscillator();
+  const gain=audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.frequency.value=800;
+  osc.type='sine';
+  gain.gain.setValueAtTime(0.1,t);
+  gain.gain.exponentialRampToValueAtTime(0.01,t+0.1);
+  osc.start(t);
+  osc.stop(t+0.1);
+}
+function playSuccess(){
+  initAudio();
+  if(!audioCtx)return;
+  const t=audioCtx.currentTime;
+  for(let i=0;i<2;i++){
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.value=900+i*200;
+    osc.type='sine';
+    const start=t+i*0.15;
+    gain.gain.setValueAtTime(0.1,start);
+    gain.gain.exponentialRampToValueAtTime(0.01,start+0.1);
+    osc.start(start);
+    osc.stop(start+0.1);
+  }
+}
 function loadSettings(){
   fetch('/settings').then(r=>r.json()).then(s=>{
     document.getElementById('accel').value=s.acceleration;
     document.getElementById('speed').value=s.speed;
     document.getElementById('ratio').value=s.gearRatio;
     document.getElementById('reverse').checked=s.reverse;
+    updateFeederStatus();
   }).catch(()=>{});
 }
-function askSaveSettings(){document.getElementById('saveModal').className='modal open';}
+function askSaveSettings(){playClick();document.getElementById('saveModal').className='modal open';}
 function closeSaveModal(){document.getElementById('saveModal').className='modal';}
 function confirmSaveSettings(){closeSaveModal();saveSettings();}
 function askFirmwareUpdate(){
   const file=document.getElementById('firmwareFile').files[0];
   const msg=document.getElementById('firmwareMsg');
-  if(!file){msg.textContent='Alege un fisier .bin';return;}
+  if(!file){msg.textContent='Alege un fisier .bin';playClick();return;}
+  playClick();
   document.getElementById('updateModal').className='modal open';
 }
 function closeUpdateModal(){document.getElementById('updateModal').className='modal';}
@@ -166,12 +297,13 @@ function uploadFirmware(){
   const file=document.getElementById('firmwareFile').files[0];
   const msg=document.getElementById('firmwareMsg');
   if(!file){msg.textContent='Alege un fisier .bin';return;}
+  playClick();
   const body=new FormData();
   body.append('firmware',file,file.name);
   msg.textContent='Se incarca firmware-ul...';
   fetch('/update',{method:'POST',body})
     .then(r=>{if(!r.ok)return r.text().then(t=>{throw new Error(t||'Update esuat');});return r.text();})
-    .then(t=>{msg.textContent=t;})
+    .then(t=>{msg.textContent=t;playSuccess();})
     .catch(e=>{msg.textContent=e.message;});
 }
 function saveSettings(){
@@ -184,26 +316,24 @@ function saveSettings(){
   });
   fetch('/settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
     .then(r=>{if(!r.ok)throw new Error(r.status===409?'Opreste feederul inainte de modificari':'Eroare salvare');return r.json();})
-    .then(s=>{msg.textContent='Setari salvate';document.getElementById('accel').value=s.acceleration;document.getElementById('speed').value=s.speed;document.getElementById('ratio').value=s.gearRatio;document.getElementById('reverse').checked=s.reverse;})
-    .catch(e=>msg.textContent=e.message);
+    .then(s=>{msg.textContent='Setari salvate';playSuccess();document.getElementById('accel').value=s.acceleration;document.getElementById('speed').value=s.speed;document.getElementById('ratio').value=s.gearRatio;document.getElementById('reverse').checked=s.reverse;})
+    .catch(e=>{msg.textContent=e.message;});
 }
-function poll(){
+function updateFeederStatus(){
   fetch('/status').then(r=>r.json()).then(d=>{
-    const state=document.getElementById('state');
-    const btn=document.getElementById('toggleBtn');
     const settings=document.getElementById('settingsBox');
-    state.textContent=d.running?'PORNIT':'OPRIT';
-    state.className=d.running?'':'off';
-    btn.textContent=d.running?'STOP':'START';
-    btn.className=d.running?'off':'';
     settings.disabled=d.running;
     document.getElementById('firmwareBox').disabled=d.running;
-    document.getElementById('clients').textContent=d.clients;
-    document.getElementById('ip').textContent=d.ip;
-    document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
   }).catch(()=>{});
 }
-setInterval(poll,1000);loadSettings();poll();
+document.addEventListener('DOMContentLoaded',()=>{
+  const backBtn=document.querySelector('.back');
+  if(backBtn){
+    backBtn.addEventListener('click',playClick);
+  }
+});
+loadSettings();
+setInterval(updateFeederStatus,1000);
 </script>
 </body>
 </html>
@@ -283,6 +413,7 @@ bool FeederWebApp::ensureAccessPoint(bool forceRestart) {
 
 void FeederWebApp::setupWebServer() {
   server_.on("/", HTTP_GET, [this]() { onRoot(); });
+  server_.on("/settings-page", HTTP_GET, [this]() { onSettingsPage(); });
   server_.on("/hotspot-detect.html", HTTP_GET, [this]() { onCaptivePortal(); });
   server_.on("/generate_204", HTTP_GET, [this]() { onCaptivePortal(); });
   server_.on("/gen_204", HTTP_GET, [this]() { onCaptivePortal(); });
@@ -303,6 +434,11 @@ void FeederWebApp::setupWebServer() {
 void FeederWebApp::onRoot() {
   server_.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   server_.send(200, "text/html", IndexHtml);
+}
+
+void FeederWebApp::onSettingsPage() {
+  server_.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  server_.send(200, "text/html", SettingsHtml);
 }
 
 void FeederWebApp::onCaptivePortal() {
