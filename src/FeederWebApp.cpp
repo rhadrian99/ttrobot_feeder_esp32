@@ -45,6 +45,9 @@ button:disabled{opacity:.48;cursor:not-allowed}
 .meta .wide{grid-column:1/-1}
 .actions{margin-top:20px;border:1px solid #314052;background:#111b25;border-radius:8px;padding:14px}
 .actions button{margin-top:0;background:#5a7c99;color:#f4f0e8;font-size:16px}
+.alert{margin-top:14px;border:2px solid #f94144;background:#3d1616;border-radius:8px;padding:14px;color:#ff6b6b;font-weight:700;text-align:center;font-size:14px;display:none}
+.alert.show{display:block}
+.alert-icon{font-size:24px;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -59,6 +62,10 @@ button:disabled{opacity:.48;cursor:not-allowed}
   <div class="meta">
     <div>Clienti WiFi<br><strong id="clients">0</strong></div>
     <div>IP<br><strong id="ip">192.168.4.1</strong></div>
+  </div>
+  <div id="alertBox" class="alert">
+    <div class="alert-icon">⚠️</div>
+    <div>Motor blocat! Miscare oprita automat.</div>
   </div>
   <section class="actions">
     <button class="secondary" onclick="window.location.href='/settings-page'">SETARI</button>
@@ -101,12 +108,28 @@ function playSuccess(){
     osc.stop(start+0.1);
   }
 }
+function playError(){
+  initAudio();
+  if(!audioCtx)return;
+  const t=audioCtx.currentTime;
+  const osc=audioCtx.createOscillator();
+  const gain=audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.frequency.value=300;
+  osc.type='sine';
+  gain.gain.setValueAtTime(0.2,t);
+  gain.gain.exponentialRampToValueAtTime(0.01,t+0.3);
+  osc.start(t);
+  osc.stop(t+0.3);
+}
 function toggleFeeder(){playClick();fetch('/toggle',{method:'POST'}).then(poll).catch(()=>{});}
 function poll(){
   fetch('/status').then(r=>r.json()).then(d=>{
     const state=document.getElementById('state');
     const btn=document.getElementById('toggleBtn');
     const settingsBtn=document.querySelector('.actions button');
+    const alertBox=document.getElementById('alertBox');
     state.textContent=d.running?'PORNIT':'OPRIT';
     state.className=d.running?'':'off';
     btn.textContent=d.running?'STOP':'START';
@@ -115,6 +138,12 @@ function poll(){
     document.getElementById('clients').textContent=d.clients;
     document.getElementById('ip').textContent=d.ip;
     document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
+    if(d.blocked){
+      alertBox.className='alert show';
+      playError();
+    }else{
+      alertBox.className='alert';
+    }
   }).catch(()=>{});
 }
 document.addEventListener('DOMContentLoaded',()=>{
@@ -451,12 +480,13 @@ void FeederWebApp::onStatus() {
   char ipBuffer[16];
   formatIp(ipBuffer, sizeof(ipBuffer), WiFi.softAPIP());
 
-  char json[220];
+  char json[240];
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\"}",
+    "{\"running\":%s,\"blocked\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\"}",
     *deps_.motorRunning ? "true" : "false",
+    *deps_.motorBlocked ? "true" : "false",
     WiFi.softAPgetStationNum(),
     ipBuffer,
     deps_.firmwareVersion

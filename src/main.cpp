@@ -31,11 +31,16 @@ bool reverseRotation = false;
 
 bool motorRunning = false;
 bool disableMotorWhenStopped = false;
+bool motorBlocked = false;
 bool lastButtonReading = HIGH;
 bool debouncedButtonState = HIGH;
 bool statusLedState = LOW;
 uint32_t lastDebounceChangeMillis = 0;
 uint32_t lastStatusLedToggleMillis = 0;
+int32_t lastMotorPosition = 0;
+uint32_t lastMotorPositionCheckMillis = 0;
+uint32_t motorStagnationStartMillis = 0;
+uint32_t motorStagnationTimeoutMillis = 5000;  // 5 secunde
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
@@ -48,6 +53,7 @@ float constrainFloat(float value, float minimum, float maximum);
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
   dependencies.motorRunning = &motorRunning;
+  dependencies.motorBlocked = &motorBlocked;
   dependencies.motorSpeedStepsPerSecond = &motorSpeedStepsPerSecond;
   dependencies.motorAccelerationStepsPerSecond2 = &motorAccelerationStepsPerSecond2;
   dependencies.gearRatio = &gearRatio;
@@ -149,6 +155,39 @@ void updateMotorEnable() {
   }
 }
 
+void checkMotorBlocked() {
+  if (stepper == nullptr || !motorRunning) {
+    motorBlocked = false;
+    motorStagnationStartMillis = 0;
+    return;
+  }
+
+  const uint32_t now = millis();
+  if (now - lastMotorPositionCheckMillis >= 1000) {  // Verifica la fiecare 1 secunda
+    lastMotorPositionCheckMillis = now;
+    
+    int32_t currentPosition = stepper->getCurrentPosition();
+    
+    if (currentPosition == lastMotorPosition) {
+      // Motorul nu s-a miscat
+      if (motorStagnationStartMillis == 0) {
+        motorStagnationStartMillis = now;
+      } else if (now - motorStagnationStartMillis > motorStagnationTimeoutMillis) {
+        motorBlocked = true;
+        motorRunning = false;
+        stepper->stopMove();
+        disableMotorWhenStopped = true;
+        Serial.println("[ALERT] Motor blocat detectat! Miscare oprita automat.");
+      }
+    } else {
+      // Motorul s-a miscat, reset
+      lastMotorPosition = currentPosition;
+      motorBlocked = false;
+      motorStagnationStartMillis = 0;
+    }
+  }
+}
+
 void updateButton() {
   const bool reading = digitalRead(Pins::Button);
 
@@ -227,4 +266,5 @@ void loop() {
   updateButton();
   updateMotorEnable();
   updateStatusLed();
+  checkMotorBlocked();
 }

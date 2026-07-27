@@ -10,6 +10,7 @@ class FeederWebApp {
  public:
   struct Dependencies {
     bool *motorRunning = nullptr;
+    bool *motorBlocked = nullptr;
     uint32_t *motorSpeedStepsPerSecond = nullptr;
     uint32_t *motorAccelerationStepsPerSecond2 = nullptr;
     float *gearRatio = nullptr;
