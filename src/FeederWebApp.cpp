@@ -63,10 +63,6 @@ button:disabled{opacity:.48;cursor:not-allowed}
     <div>Clienti WiFi<br><strong id="clients">0</strong></div>
     <div>IP<br><strong id="ip">192.168.4.1</strong></div>
   </div>
-  <div id="alertBox" class="alert">
-    <div class="alert-icon">⚠️</div>
-    <div>Motor blocat! Miscare oprita automat.</div>
-  </div>
   <section class="actions">
     <button class="secondary" onclick="window.location.href='/settings-page'">SETARI</button>
   </section>
@@ -129,7 +125,6 @@ function poll(){
     const state=document.getElementById('state');
     const btn=document.getElementById('toggleBtn');
     const settingsBtn=document.querySelector('.actions button');
-    const alertBox=document.getElementById('alertBox');
     state.textContent=d.running?'PORNIT':'OPRIT';
     state.className=d.running?'':'off';
     btn.textContent=d.running?'STOP':'START';
@@ -138,12 +133,6 @@ function poll(){
     document.getElementById('clients').textContent=d.clients;
     document.getElementById('ip').textContent=d.ip;
     document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
-    if(d.blocked){
-      alertBox.className='alert show';
-      playError();
-    }else{
-      alertBox.className='alert';
-    }
   }).catch(()=>{});
 }
 document.addEventListener('DOMContentLoaded',()=>{
@@ -484,9 +473,8 @@ void FeederWebApp::onStatus() {
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"blocked\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\"}",
+    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\"}",
     *deps_.motorRunning ? "true" : "false",
-    *deps_.motorBlocked ? "true" : "false",
     WiFi.softAPgetStationNum(),
     ipBuffer,
     deps_.firmwareVersion

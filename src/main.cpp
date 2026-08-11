@@ -12,7 +12,7 @@ constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
 constexpr uint32_t DefaultMotorAccelerationStepsPerSecond2 = 1000;
 constexpr float DefaultGearRatio = 1.0f;
 constexpr uint32_t DebounceMillis = 35;
-constexpr uint32_t StatusLedBlinkMillis = 2000;
+constexpr uint32_t StatusLedBlinkMillis = 250;
 constexpr uint32_t MinMotorSpeedStepsPerSecond = 1;
 constexpr uint32_t MaxMotorSpeedStepsPerSecond = 20000;
 constexpr uint32_t MinMotorAccelerationStepsPerSecond2 = 1;
@@ -31,7 +31,6 @@ bool reverseRotation = false;
 
 bool motorRunning = false;
 bool disableMotorWhenStopped = false;
-bool motorBlocked = false;
 bool lastButtonReading = HIGH;
 bool debouncedButtonState = HIGH;
 bool statusLedState = LOW;
@@ -49,7 +48,6 @@ float constrainFloat(float value, float minimum, float maximum);
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
   dependencies.motorRunning = &motorRunning;
-  dependencies.motorBlocked = &motorBlocked;
   dependencies.motorSpeedStepsPerSecond = &motorSpeedStepsPerSecond;
   dependencies.motorAccelerationStepsPerSecond2 = &motorAccelerationStepsPerSecond2;
   dependencies.gearRatio = &gearRatio;
@@ -130,7 +128,6 @@ void toggleMotor() {
 
   if (motorRunning) {
     disableMotorWhenStopped = false;
-    motorBlocked = false;
     setMotorEnabled(true);
     if (reverseRotation) {
       stepper->runBackward();
@@ -180,11 +177,11 @@ void updateStatusLed() {
       statusLedState = false;
       writeStatusLed(false);
     }
+    lastStatusLedToggleMillis = millis();
     return;
   }
 
   const uint32_t now = millis();
-
   if (now - lastStatusLedToggleMillis >= StatusLedBlinkMillis) {
     lastStatusLedToggleMillis = now;
     statusLedState = !statusLedState;
