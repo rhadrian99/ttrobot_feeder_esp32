@@ -104,8 +104,10 @@ void saveMotorSettings() {
 }
 
 void setMotorEnabled(bool enabled) {
+  const uint8_t enableLevel = enabled ? EnableActiveLevel : !EnableActiveLevel;
+  digitalWrite(Pins::Enable, enableLevel);
+
   if (stepper == nullptr) {
-    digitalWrite(Pins::Enable, enabled ? EnableActiveLevel : !EnableActiveLevel);
     return;
   }
 
@@ -136,7 +138,8 @@ void toggleMotor() {
     }
   } else {
     stepper->stopMove();
-    disableMotorWhenStopped = true;
+    setMotorEnabled(false);
+    disableMotorWhenStopped = false;
   }
 
   Serial.println(motorRunning ? "Motor pornit" : "Motor oprit");
