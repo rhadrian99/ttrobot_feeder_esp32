@@ -5,7 +5,7 @@
 #include "FeederWebApp.h"
 #include "board_config.h"
 
-#define FW_VERSION "1.0.3"
+#define FW_VERSION "1.0.4"
 
 constexpr bool EnableActiveLevel = LOW;
 constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
@@ -37,10 +37,6 @@ bool debouncedButtonState = HIGH;
 bool statusLedState = LOW;
 uint32_t lastDebounceChangeMillis = 0;
 uint32_t lastStatusLedToggleMillis = 0;
-int32_t lastMotorPosition = 0;
-uint32_t lastMotorPositionCheckMillis = 0;
-uint32_t motorStagnationStartMillis = 0;
-uint32_t motorStagnationTimeoutMillis = 5000;  // 5 secunde
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
@@ -134,6 +130,7 @@ void toggleMotor() {
 
   if (motorRunning) {
     disableMotorWhenStopped = false;
+    motorBlocked = false;
     setMotorEnabled(true);
     if (reverseRotation) {
       stepper->runBackward();
@@ -152,39 +149,6 @@ void updateMotorEnable() {
   if (stepper != nullptr && disableMotorWhenStopped && !stepper->isRunning()) {
     setMotorEnabled(false);
     disableMotorWhenStopped = false;
-  }
-}
-
-void checkMotorBlocked() {
-  if (stepper == nullptr || !motorRunning) {
-    motorBlocked = false;
-    motorStagnationStartMillis = 0;
-    return;
-  }
-
-  const uint32_t now = millis();
-  if (now - lastMotorPositionCheckMillis >= 1000) {  // Verifica la fiecare 1 secunda
-    lastMotorPositionCheckMillis = now;
-    
-    int32_t currentPosition = stepper->getCurrentPosition();
-    
-    if (currentPosition == lastMotorPosition) {
-      // Motorul nu s-a miscat
-      if (motorStagnationStartMillis == 0) {
-        motorStagnationStartMillis = now;
-      } else if (now - motorStagnationStartMillis > motorStagnationTimeoutMillis) {
-        motorBlocked = true;
-        motorRunning = false;
-        stepper->stopMove();
-        disableMotorWhenStopped = true;
-        Serial.println("[ALERT] Motor blocat detectat! Miscare oprita automat.");
-      }
-    } else {
-      // Motorul s-a miscat, reset
-      lastMotorPosition = currentPosition;
-      motorBlocked = false;
-      motorStagnationStartMillis = 0;
-    }
   }
 }
 
@@ -266,5 +230,4 @@ void loop() {
   updateButton();
   updateMotorEnable();
   updateStatusLed();
-  checkMotorBlocked();
 }
