@@ -15,10 +15,13 @@ constexpr uint32_t DebounceMillis = 35;
 constexpr uint32_t StatusLedBlinkMillis = 250;
 constexpr uint32_t MinMotorSpeedStepsPerSecond = 1;
 constexpr uint32_t MaxMotorSpeedStepsPerSecond = 20000;
-constexpr uint32_t MinMotorAccelerationStepsPerSecond2 = 1;
-constexpr uint32_t MaxMotorAccelerationStepsPerSecond2 = 50000;
-constexpr float MinGearRatio = 0.01f;
-constexpr float MaxGearRatio = 100.0f;
+constexpr uint32_t MinMotorAccelerationStepsPerSecond2 = 100;
+constexpr uint32_t MaxMotorAccelerationStepsPerSecond2 = 16000;
+constexpr uint32_t MinRotationPreset = 4;
+constexpr uint32_t MaxRotationPreset = 7;
+constexpr uint32_t DefaultRotationPreset = 5;
+constexpr float MinGearRatio = 1.0f;
+constexpr float MaxGearRatio = 5.0f;
 
 FastAccelStepperEngine engine;
 FastAccelStepper *stepper = nullptr;
@@ -26,6 +29,7 @@ Preferences preferences;
 
 uint32_t motorSpeedStepsPerSecond = DefaultMotorSpeedStepsPerSecond;
 uint32_t motorAccelerationStepsPerSecond2 = DefaultMotorAccelerationStepsPerSecond2;
+uint32_t rotationPreset = DefaultRotationPreset;
 float gearRatio = DefaultGearRatio;
 bool reverseRotation = false;
 
@@ -56,6 +60,7 @@ FeederWebApp::Dependencies buildWebDependencies() {
   dependencies.motorRunning = &motorRunning;
   dependencies.rotationCounter = &rotationsCounter;
   dependencies.rotationPeriodMs = &lastRotationTimeMs;
+  dependencies.rotationPreset = &rotationPreset;
   dependencies.motorSpeedStepsPerSecond = &motorSpeedStepsPerSecond;
   dependencies.motorAccelerationStepsPerSecond2 = &motorAccelerationStepsPerSecond2;
   dependencies.gearRatio = &gearRatio;
@@ -89,17 +94,30 @@ void applyMotorSettings() {
   stepper->setAcceleration(motorAccelerationStepsPerSecond2);
 }
 
+void updateMotorSpeedFromPreset() {
+  const float stepsPerOutputRotation = 200.0f * 8.0f * gearRatio;
+  const float computedSpeed = stepsPerOutputRotation / static_cast<float>(rotationPreset);
+  motorSpeedStepsPerSecond = static_cast<uint32_t>(lroundf(computedSpeed));
+  motorSpeedStepsPerSecond = constrain(motorSpeedStepsPerSecond, MinMotorSpeedStepsPerSecond, MaxMotorSpeedStepsPerSecond);
+}
+
 void loadMotorSettings() {
   preferences.begin("feeder", true);
   motorSpeedStepsPerSecond = preferences.getUInt("speed", DefaultMotorSpeedStepsPerSecond);
   motorAccelerationStepsPerSecond2 = preferences.getUInt("accel", DefaultMotorAccelerationStepsPerSecond2);
   gearRatio = preferences.getFloat("ratio", DefaultGearRatio);
   reverseRotation = preferences.getBool("reverse", false);
+  rotationPreset = preferences.getUInt("rotationPreset", DefaultRotationPreset);
   preferences.end();
 
+  rotationPreset = constrain(rotationPreset, MinRotationPreset, MaxRotationPreset);
   motorSpeedStepsPerSecond = constrain(motorSpeedStepsPerSecond, MinMotorSpeedStepsPerSecond, MaxMotorSpeedStepsPerSecond);
   motorAccelerationStepsPerSecond2 = constrain(motorAccelerationStepsPerSecond2, MinMotorAccelerationStepsPerSecond2, MaxMotorAccelerationStepsPerSecond2);
   gearRatio = constrainFloat(gearRatio, MinGearRatio, MaxGearRatio);
+
+  if (rotationPreset >= MinRotationPreset && rotationPreset <= MaxRotationPreset) {
+    updateMotorSpeedFromPreset();
+  }
 }
 
 void saveMotorSettings() {
@@ -108,6 +126,7 @@ void saveMotorSettings() {
   preferences.putUInt("accel", motorAccelerationStepsPerSecond2);
   preferences.putFloat("ratio", gearRatio);
   preferences.putBool("reverse", reverseRotation);
+  preferences.putUInt("rotationPreset", rotationPreset);
   preferences.end();
 }
 

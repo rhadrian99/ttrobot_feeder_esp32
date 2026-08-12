@@ -183,6 +183,11 @@ input[type=file]{font-size:13px;color:#b8c5d1}
 #updateFirmware{margin-top:12px;font-size:16px;padding:13px;background:#f3722c;color:#101820}
 #settingsBox[disabled]{opacity:.48}
 #firmwareBox[disabled]{opacity:.48}
+.presetBlock{margin-top:14px;border:1px solid #314052;border-radius:8px;background:#0f1720;padding:12px}
+.presetLabel{font-size:12px;color:#b8c5d1;margin-bottom:10px;letter-spacing:.04em;text-transform:uppercase}
+.presetGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.presetButton{width:100%;padding:12px 8px;border:1px solid #314052;border-radius:8px;background:#111b25;color:#f4f0e8;font-size:18px;font-weight:700;cursor:pointer}
+.presetButton.selected{background:#f9c74f;color:#101820;border-color:#f9c74f}
 #settingsMsg,#firmwareMsg{min-height:18px;margin-top:8px;color:#9fb3c8;font-size:12px;text-align:center}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;place-items:center;padding:18px;z-index:5}
 .modal.open{display:grid}
@@ -206,14 +211,20 @@ input[type=file]{font-size:13px;color:#b8c5d1}
     <fieldset id="settingsBox">
       <div class="grid">
         <label>Acceleratie (pasi/s^2)
-          <input id="accel" type="number" min="1" max="50000" step="1" value="1000">
-        </label>
-        <label>Viteza (pasi/s)
-          <input id="speed" type="number" min="1" max="20000" step="1" value="400">
+          <input id="accel" type="number" min="100" max="16000" step="1" value="1000">
         </label>
         <label>Ratie reductor
-          <input id="ratio" type="number" min="0.01" max="100" step="0.01" value="1">
+          <input id="ratio" type="number" min="1" max="5" step="0.05" value="1">
         </label>
+      </div>
+      <div class="presetBlock">
+        <div class="presetLabel">Presetare rotație (sec/rotație)</div>
+        <div class="presetGrid">
+          <button type="button" class="presetButton" data-preset="4">4s</button>
+          <button type="button" class="presetButton selected" data-preset="5">5s</button>
+          <button type="button" class="presetButton" data-preset="6">6s</button>
+          <button type="button" class="presetButton" data-preset="7">7s</button>
+        </div>
       </div>
       <div class="switchRow">
         <span>Schimba directia de rotatie</span>
@@ -294,12 +305,25 @@ function playSuccess(){
     osc.stop(start+0.1);
   }
 }
+const MOTOR_STEPS_PER_ROTATION = 200;
+const MICROSTEPS_PER_STEP = 8;
+const GEAR_RATIO = 4.36;
+const OUTPUT_STEPS_PER_ROTATION = MOTOR_STEPS_PER_ROTATION * MICROSTEPS_PER_STEP * GEAR_RATIO;
+function setPresetButtonSelection(value){
+  const preset = Number(value || 5);
+  document.querySelectorAll('.presetButton').forEach(btn => {
+    btn.classList.toggle('selected', Number(btn.dataset.preset) === preset);
+  });
+}
 function loadSettings(){
   fetch('/settings').then(r=>r.json()).then(s=>{
+    const preset = Number(s.rotationPreset ?? 5);
+    const clampedPreset = Math.max(4, Math.min(7, preset));
+
     document.getElementById('accel').value=s.acceleration;
-    document.getElementById('speed').value=s.speed;
     document.getElementById('ratio').value=s.gearRatio;
     document.getElementById('reverse').checked=s.reverse;
+    setPresetButtonSelection(clampedPreset);
     updateFeederStatus();
   }).catch(()=>{});
 }
@@ -330,15 +354,22 @@ function uploadFirmware(){
 }
 function saveSettings(){
   const msg=document.getElementById('settingsMsg');
+  const selectedPreset = document.querySelector('.presetButton.selected')?.dataset.preset || 5;
   const body=new URLSearchParams({
     acceleration:document.getElementById('accel').value,
-    speed:document.getElementById('speed').value,
+    rotationPreset:selectedPreset,
     gearRatio:document.getElementById('ratio').value,
     reverse:document.getElementById('reverse').checked?'1':'0'
   });
   fetch('/settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
     .then(r=>{if(!r.ok)throw new Error(r.status===409?'Opreste feederul inainte de modificari':'Eroare salvare');return r.json();})
-    .then(s=>{msg.textContent='Setari salvate';playSuccess();document.getElementById('accel').value=s.acceleration;document.getElementById('speed').value=s.speed;document.getElementById('ratio').value=s.gearRatio;document.getElementById('reverse').checked=s.reverse;})
+    .then(s=>{msg.textContent='Setari salvate';playSuccess();
+      const preset = Number(s.rotationPreset ?? 5);
+      const clampedPreset = Math.max(4, Math.min(7, preset));
+      document.getElementById('accel').value=s.acceleration;
+      document.getElementById('ratio').value=s.gearRatio;
+      document.getElementById('reverse').checked=s.reverse;
+      setPresetButtonSelection(clampedPreset);})
     .catch(e=>{msg.textContent=e.message;});
 }
 function updateFeederStatus(){
@@ -353,6 +384,12 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(backBtn){
     backBtn.addEventListener('click',playClick);
   }
+  document.querySelectorAll('.presetButton').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const preset = Number(btn.dataset.preset || 5);
+      setPresetButtonSelection(preset);
+    });
+  });
 });
 loadSettings();
 setInterval(updateFeederStatus,1000);
@@ -489,15 +526,22 @@ void FeederWebApp::onStatus() {
 }
 
 void FeederWebApp::sendSettings() {
-  char json[160];
+  const float outputStepsPerRotation = 200.0f * 8.0f * (*deps_.gearRatio);
+  const float secondsPerRotation = *deps_.motorSpeedStepsPerSecond > 0 ? (outputStepsPerRotation / static_cast<float>(*deps_.motorSpeedStepsPerSecond)) : 0.0f;
+  const uint32_t presetValue = deps_.rotationPreset != nullptr
+    ? *deps_.rotationPreset
+    : (secondsPerRotation > 0.0f ? static_cast<uint32_t>(lroundf(outputStepsPerRotation / secondsPerRotation)) : 5u);
+  char json[220];
   snprintf(
     json,
     sizeof(json),
-    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s}",
+    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s,\"rotationPreset\":%lu,\"secondsPerRotation\":%.2f}",
     static_cast<unsigned long>(*deps_.motorSpeedStepsPerSecond),
     static_cast<unsigned long>(*deps_.motorAccelerationStepsPerSecond2),
     *deps_.gearRatio,
-    *deps_.reverseRotation ? "true" : "false"
+    *deps_.reverseRotation ? "true" : "false",
+    static_cast<unsigned long>(presetValue),
+    secondsPerRotation
   );
   server_.send(200, "application/json", json);
 }
@@ -512,23 +556,49 @@ void FeederWebApp::onPostSettings() {
     return;
   }
 
-  if (!server_.hasArg("speed") || !server_.hasArg("acceleration") || !server_.hasArg("gearRatio") || !server_.hasArg("reverse")) {
+  if (!server_.hasArg("acceleration") || !server_.hasArg("gearRatio") || !server_.hasArg("reverse")) {
     server_.send(400, "text/plain", "Lipsesc setari");
     return;
   }
 
-  *deps_.motorSpeedStepsPerSecond = constrain(
-    static_cast<uint32_t>(server_.arg("speed").toInt()),
-    kMinMotorSpeedStepsPerSecond,
-    kMaxMotorSpeedStepsPerSecond
-  );
+  const uint32_t requestedPreset = server_.hasArg("rotationPreset")
+    ? constrain(static_cast<uint32_t>(server_.arg("rotationPreset").toInt()), 4u, 7u)
+    : 5u;
+
   *deps_.motorAccelerationStepsPerSecond2 = constrain(
     static_cast<uint32_t>(server_.arg("acceleration").toInt()),
     kMinMotorAccelerationStepsPerSecond2,
     kMaxMotorAccelerationStepsPerSecond2
   );
+
+  const float previousGearRatio = *deps_.gearRatio;
   *deps_.gearRatio = constrainFloat(server_.arg("gearRatio").toFloat(), kMinGearRatio, kMaxGearRatio);
+  if (*deps_.gearRatio < kMinGearRatio) {
+    *deps_.gearRatio = kMinGearRatio;
+  }
+  if (*deps_.gearRatio > kMaxGearRatio) {
+    *deps_.gearRatio = kMaxGearRatio;
+  }
   *deps_.reverseRotation = server_.arg("reverse") == "1";
+
+  if (*deps_.gearRatio > 0.0f) {
+    const float outputStepsPerRotation = 200.0f * 8.0f * (*deps_.gearRatio);
+    *deps_.motorSpeedStepsPerSecond = constrain(
+      static_cast<uint32_t>(lroundf(outputStepsPerRotation / static_cast<float>(requestedPreset))),
+      kMinMotorSpeedStepsPerSecond,
+      kMaxMotorSpeedStepsPerSecond
+    );
+  } else {
+    *deps_.motorSpeedStepsPerSecond = constrain(
+      static_cast<uint32_t>(previousGearRatio > 0.0f ? (200.0f * 8.0f * previousGearRatio / static_cast<float>(requestedPreset)) : 400.0f),
+      kMinMotorSpeedStepsPerSecond,
+      kMaxMotorSpeedStepsPerSecond
+    );
+  }
+
+  if (deps_.rotationPreset != nullptr) {
+    *deps_.rotationPreset = requestedPreset;
+  }
 
   if (deps_.saveMotorSettings != nullptr) {
     deps_.saveMotorSettings();

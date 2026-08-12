@@ -12,6 +12,7 @@ class FeederWebApp {
     bool *motorRunning = nullptr;
     uint32_t *rotationCounter = nullptr;
     uint32_t *rotationPeriodMs = nullptr;
+    uint32_t *rotationPreset = nullptr;
     uint32_t *motorSpeedStepsPerSecond = nullptr;
     uint32_t *motorAccelerationStepsPerSecond2 = nullptr;
     float *gearRatio = nullptr;
@@ -35,10 +36,10 @@ class FeederWebApp {
   static constexpr uint32_t kFirmwareValidationMaxBytes = 32768;
   static constexpr uint32_t kMinMotorSpeedStepsPerSecond = 1;
   static constexpr uint32_t kMaxMotorSpeedStepsPerSecond = 20000;
-  static constexpr uint32_t kMinMotorAccelerationStepsPerSecond2 = 1;
-  static constexpr uint32_t kMaxMotorAccelerationStepsPerSecond2 = 50000;
-  static constexpr float kMinGearRatio = 0.01f;
-  static constexpr float kMaxGearRatio = 100.0f;
+  static constexpr uint32_t kMinMotorAccelerationStepsPerSecond2 = 100;
+  static constexpr uint32_t kMaxMotorAccelerationStepsPerSecond2 = 16000;
+  static constexpr float kMinGearRatio = 1.0f;
+  static constexpr float kMaxGearRatio = 5.0f;
   static constexpr const char *kWifiPassword = "feeder1234";
   static const IPAddress kApIp;
   static const IPAddress kApSubnet;
