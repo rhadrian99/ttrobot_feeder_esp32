@@ -62,6 +62,7 @@ button:disabled{opacity:.48;cursor:not-allowed}
   <div class="meta">
     <div>Clienti WiFi<br><strong id="clients">0</strong></div>
     <div>IP<br><strong id="ip">192.168.4.1</strong></div>
+    <div class="wide">Rotatii<br><strong id="rotations">0.00</strong></div>
   </div>
   <section class="actions">
     <button class="secondary" onclick="window.location.href='/settings-page'">SETARI</button>
@@ -132,6 +133,7 @@ function poll(){
     settingsBtn.disabled=d.running;
     document.getElementById('clients').textContent=d.clients;
     document.getElementById('ip').textContent=d.ip;
+    document.getElementById('rotations').textContent=Number(d.rotations||0);
     document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
   }).catch(()=>{});
 }
@@ -473,11 +475,12 @@ void FeederWebApp::onStatus() {
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\"}",
+    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"rotations\":%lu}",
     *deps_.motorRunning ? "true" : "false",
     WiFi.softAPgetStationNum(),
     ipBuffer,
-    deps_.firmwareVersion
+    deps_.firmwareVersion,
+    deps_.rotationCounter != nullptr ? static_cast<unsigned long>(*deps_.rotationCounter) : 0UL
   );
   server_.send(200, "application/json", json);
 }

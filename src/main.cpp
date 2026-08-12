@@ -36,6 +36,9 @@ bool debouncedButtonState = HIGH;
 bool statusLedState = LOW;
 uint32_t lastDebounceChangeMillis = 0;
 uint32_t lastStatusLedToggleMillis = 0;
+bool hallActive = false;
+bool lastHallState = false;
+uint32_t rotationsCounter = 0;
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
@@ -43,11 +46,13 @@ void applyMotorSettings();
 void loadMotorSettings();
 void saveMotorSettings();
 void writeStatusLed(bool on);
+void updateRotationCounter();
 float constrainFloat(float value, float minimum, float maximum);
 
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
   dependencies.motorRunning = &motorRunning;
+  dependencies.rotationCounter = &rotationsCounter;
   dependencies.motorSpeedStepsPerSecond = &motorSpeedStepsPerSecond;
   dependencies.motorAccelerationStepsPerSecond2 = &motorAccelerationStepsPerSecond2;
   dependencies.gearRatio = &gearRatio;
@@ -130,6 +135,8 @@ void toggleMotor() {
 
   if (motorRunning) {
     disableMotorWhenStopped = false;
+    rotationsCounter = 0;
+    lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
     setMotorEnabled(true);
     if (reverseRotation) {
       stepper->runBackward();
@@ -138,11 +145,27 @@ void toggleMotor() {
     }
   } else {
     stepper->stopMove();
+    rotationsCounter = 0;
+    lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
     setMotorEnabled(false);
     disableMotorWhenStopped = false;
   }
 
   Serial.println(motorRunning ? "Motor pornit" : "Motor oprit");
+}
+
+void updateRotationCounter() {
+  if (!motorRunning) {
+    rotationsCounter = 0;
+    return;
+  }
+
+  // O rotație = o trecere a magnetului peste senzor Hall.
+  const bool currentHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+  if (currentHallState && !lastHallState) {
+    rotationsCounter++;
+  }
+  lastHallState = currentHallState;
 }
 
 void updateMotorEnable() {
@@ -175,21 +198,19 @@ void writeStatusLed(bool on) {
 }
 
 void updateStatusLed() {
-  if (!motorRunning) {
-    if (statusLedState) {
-      statusLedState = false;
-      writeStatusLed(false);
-    }
+  const bool hallReading = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+  hallActive = hallReading;
+
+  if (!hallReading) {
+    statusLedState = true;
+    writeStatusLed(true);
     lastStatusLedToggleMillis = millis();
     return;
   }
 
-  const uint32_t now = millis();
-  if (now - lastStatusLedToggleMillis >= StatusLedBlinkMillis) {
-    lastStatusLedToggleMillis = now;
-    statusLedState = !statusLedState;
-    writeStatusLed(statusLedState);
-  }
+  statusLedState = false;
+  writeStatusLed(false);
+  lastStatusLedToggleMillis = millis();
 }
 
 void setup() {
@@ -201,6 +222,7 @@ void setup() {
   pinMode(Pins::Enable, OUTPUT);
   pinMode(Pins::Button, INPUT_PULLUP);
   pinMode(Pins::StatusLed, OUTPUT);
+  pinMode(Pins::HallSensor, INPUT_PULLUP);
 
   digitalWrite(Pins::Step, LOW);
   statusLedState = false;
@@ -219,6 +241,9 @@ void setup() {
     Serial.println("Eroare: nu pot conecta pinul STEP la FastAccelStepper");
   }
 
+  rotationsCounter = 0;
+  lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+
   webApp.begin();
 
   Serial.print(BoardName);
@@ -229,5 +254,6 @@ void loop() {
   webApp.loop();
   updateButton();
   updateMotorEnable();
+  updateRotationCounter();
   updateStatusLed();
 }
