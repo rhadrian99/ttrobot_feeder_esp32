@@ -39,6 +39,8 @@ uint32_t lastStatusLedToggleMillis = 0;
 bool hallActive = false;
 bool lastHallState = false;
 uint32_t rotationsCounter = 0;
+uint32_t lastHallTransitionMillis = 0;
+uint32_t lastRotationTimeMs = 0;
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
@@ -53,6 +55,7 @@ FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
   dependencies.motorRunning = &motorRunning;
   dependencies.rotationCounter = &rotationsCounter;
+  dependencies.rotationPeriodMs = &lastRotationTimeMs;
   dependencies.motorSpeedStepsPerSecond = &motorSpeedStepsPerSecond;
   dependencies.motorAccelerationStepsPerSecond2 = &motorAccelerationStepsPerSecond2;
   dependencies.gearRatio = &gearRatio;
@@ -137,6 +140,8 @@ void toggleMotor() {
     disableMotorWhenStopped = false;
     rotationsCounter = 0;
     lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+    lastHallTransitionMillis = 0;
+    lastRotationTimeMs = 0;
     setMotorEnabled(true);
     if (reverseRotation) {
       stepper->runBackward();
@@ -147,6 +152,8 @@ void toggleMotor() {
     stepper->stopMove();
     rotationsCounter = 0;
     lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+    lastHallTransitionMillis = 0;
+    lastRotationTimeMs = 0;
     setMotorEnabled(false);
     disableMotorWhenStopped = false;
   }
@@ -157,12 +164,19 @@ void toggleMotor() {
 void updateRotationCounter() {
   if (!motorRunning) {
     rotationsCounter = 0;
+    lastHallTransitionMillis = 0;
+    lastRotationTimeMs = 0;
     return;
   }
 
   // O rotație = o trecere a magnetului peste senzor Hall.
   const bool currentHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
   if (currentHallState && !lastHallState) {
+    const uint32_t now = millis();
+    if (lastHallTransitionMillis != 0) {
+      lastRotationTimeMs = now - lastHallTransitionMillis;
+    }
+    lastHallTransitionMillis = now;
     rotationsCounter++;
   }
   lastHallState = currentHallState;
@@ -243,6 +257,8 @@ void setup() {
 
   rotationsCounter = 0;
   lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+  lastHallTransitionMillis = 0;
+  lastRotationTimeMs = 0;
 
   webApp.begin();
 

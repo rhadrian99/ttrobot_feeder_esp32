@@ -62,7 +62,8 @@ button:disabled{opacity:.48;cursor:not-allowed}
   <div class="meta">
     <div>Clienti WiFi<br><strong id="clients">0</strong></div>
     <div>IP<br><strong id="ip">192.168.4.1</strong></div>
-    <div class="wide">Rotatii<br><strong id="rotations">0.00</strong></div>
+    <div>Rotatii<br><strong id="rotations">0</strong></div>
+    <div>Perioada<br><strong id="rotPeriod">0 ms</strong></div>
   </div>
   <section class="actions">
     <button class="secondary" onclick="window.location.href='/settings-page'">SETARI</button>
@@ -134,6 +135,7 @@ function poll(){
     document.getElementById('clients').textContent=d.clients;
     document.getElementById('ip').textContent=d.ip;
     document.getElementById('rotations').textContent=Number(d.rotations||0);
+    document.getElementById('rotPeriod').textContent=d.rotationPeriodMs!=null?String(d.rotationPeriodMs)+' ms':'0 ms';
     document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
   }).catch(()=>{});
 }
@@ -471,16 +473,17 @@ void FeederWebApp::onStatus() {
   char ipBuffer[16];
   formatIp(ipBuffer, sizeof(ipBuffer), WiFi.softAPIP());
 
-  char json[240];
+  char json[260];
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"rotations\":%lu}",
+    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"rotations\":%lu,\"rotationPeriodMs\":%lu}",
     *deps_.motorRunning ? "true" : "false",
     WiFi.softAPgetStationNum(),
     ipBuffer,
     deps_.firmwareVersion,
-    deps_.rotationCounter != nullptr ? static_cast<unsigned long>(*deps_.rotationCounter) : 0UL
+    deps_.rotationCounter != nullptr ? static_cast<unsigned long>(*deps_.rotationCounter) : 0UL,
+    deps_.rotationPeriodMs != nullptr ? static_cast<unsigned long>(*deps_.rotationPeriodMs) : 0UL
   );
   server_.send(200, "application/json", json);
 }
