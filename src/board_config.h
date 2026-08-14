@@ -49,3 +49,13 @@ constexpr const char *BoardName = "ESP32-WROOM";
 constexpr const char *FirmwareIdentityPrefix = "TTROBOT_FEEDER_ESP32_FW:";
 
 #endif
+
+// Constante motor/driver comune ambelor placi.
+constexpr uint32_t kMotorStepsPerRevolution = 200;
+constexpr uint32_t kMicrostepsPerStep = 8;
+
+inline float constrainFloat(float value, float minimum, float maximum) {
+  if (value < minimum) return minimum;
+  if (value > maximum) return maximum;
+  return value;
+}

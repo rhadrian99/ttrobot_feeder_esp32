@@ -9,15 +9,6 @@ const IPAddress FeederWebApp::kApIp(192, 168, 4, 1);
 const IPAddress FeederWebApp::kApSubnet(255, 255, 255, 0);
 
 namespace {
-float constrainFloat(float value, float minimum, float maximum) {
-  if (value < minimum) {
-    return minimum;
-  }
-  if (value > maximum) {
-    return maximum;
-  }
-  return value;
-}
 
 const char IndexHtml[] = R"rawliteral(
 <!DOCTYPE html>
@@ -166,7 +157,7 @@ h1{font-size:26px;text-align:center;margin-bottom:8px;color:#f9c74f;letter-spaci
 .sub{text-align:center;color:#9fb3c8;font-size:13px;margin-bottom:18px}
 button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-weight:700;color:#101820;background:#90be6d;cursor:pointer;touch-action:manipulation}
 button.back{background:#5a7c99;color:#f4f0e8;font-size:16px;margin-bottom:14px}
-.settings{border:1px solid #314052;background:#111b25;border-radius:8px;padding:14px;margin-bottom:14px}
+.settings{background:transparent;border:0;border-radius:0;padding:0;margin-bottom:14px}
 .settings h2{font-size:18px;color:#f9c74f;margin-bottom:10px;letter-spacing:0}
 .grid{display:grid;gap:10px}
 label{display:grid;gap:5px;color:#b8c5d1;font-size:12px}
@@ -183,7 +174,8 @@ input[type=file]{font-size:13px;color:#b8c5d1}
 #updateFirmware{margin-top:12px;font-size:16px;padding:13px;background:#f3722c;color:#101820}
 #settingsBox[disabled]{opacity:.48}
 #firmwareBox[disabled]{opacity:.48}
-.presetBlock{margin-top:14px;border:1px solid #314052;border-radius:8px;background:#0f1720;padding:12px}
+fieldset{border:0;padding:0;margin:0;min-inline-size:0}
+.presetBlock{margin-top:14px;border:0;border-radius:8px;background:transparent;padding:0}
 .presetLabel{font-size:12px;color:#b8c5d1;margin-bottom:10px;letter-spacing:.04em;text-transform:uppercase}
 .presetGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .presetButton{width:100%;padding:12px 8px;border:1px solid #314052;border-radius:8px;background:#111b25;color:#f4f0e8;font-size:18px;font-weight:700;cursor:pointer}
@@ -250,8 +242,8 @@ input[type=file]{font-size:13px;color:#b8c5d1}
 </main>
 <div id="saveModal" class="modal">
   <div class="modalBox">
-    <h2>Confirmare salvare</h2>
-    <p>Salvezi noile setari ale motorului in memoria flash?</p>
+    <h2 id="saveModalTitle">Confirmare salvare</h2>
+    <p id="saveModalText">Salvezi noile setari ale motorului in memoria flash?</p>
     <div class="modalActions">
       <button id="cancelSave" type="button" onclick="closeSaveModal()">ANULEAZA</button>
       <button id="confirmSave" type="button" onclick="confirmSaveSettings()">SALVEAZA</button>
@@ -305,10 +297,93 @@ function playSuccess(){
     osc.stop(start+0.1);
   }
 }
-const MOTOR_STEPS_PER_ROTATION = 200;
-const MICROSTEPS_PER_STEP = 8;
-const GEAR_RATIO = 4.36;
-const OUTPUT_STEPS_PER_ROTATION = MOTOR_STEPS_PER_ROTATION * MICROSTEPS_PER_STEP * GEAR_RATIO;
+function getSettingsValidationIssues(){
+  const issues=[];
+  const accelValue = Number(document.getElementById('accel').value);
+  if(Number.isNaN(accelValue) || accelValue < 100 || accelValue > 16000){
+    issues.push({field:'accel', label:'Acceleratie', min:100, max:16000});
+  }
+  const ratioValue = Number(document.getElementById('ratio').value);
+  if(Number.isNaN(ratioValue) || ratioValue < 1 || ratioValue > 5){
+    issues.push({field:'ratio', label:'Ratie reductor', min:1, max:5});
+  }
+  return issues;
+}
+function focusFirstInvalidField(){
+  const issues = getSettingsValidationIssues();
+  if(issues.length === 0){return;}
+  const field = document.getElementById(issues[0].field);
+  if(field){field.focus();field.select();}
+}
+function showSettingsValidationModal(issues){
+  const modal=document.getElementById('saveModal');
+  const title=document.getElementById('saveModalTitle');
+  const text=document.getElementById('saveModalText');
+  const cancel=document.getElementById('cancelSave');
+  const confirm=document.getElementById('confirmSave');
+  title.textContent='Validare setari';
+  text.innerHTML = issues.map(issue =>
+    '<strong>' + issue.label + '</strong>: intre ' + issue.min + ' si ' + issue.max + '<br>'
+  ).join('');
+  cancel.style.display='none';
+  confirm.textContent='OK';
+  confirm.onclick = () => {
+    closeSaveModal();
+    focusFirstInvalidField();
+  };
+  modal.className='modal open';
+}
+function clampValue(value, min, max){
+  const numeric = Number(value);
+  if(!Number.isFinite(numeric)) return min;
+  return Math.min(Math.max(numeric, min), max);
+}
+function clampAccelValue(value){
+  const clamped = clampValue(value, 100, 16000);
+  return Math.round(clamped);
+}
+function clampRatioValue(value){
+  const clamped = clampValue(value, 1, 5);
+  return Number(clamped.toFixed(2));
+}
+function askSaveSettings(){
+  const issues = getSettingsValidationIssues();
+  if(issues.length > 0){
+    playClick();
+    showSettingsValidationModal(issues);
+    return;
+  }
+  playClick();
+  const modal=document.getElementById('saveModal');
+  const title=document.getElementById('saveModalTitle');
+  const text=document.getElementById('saveModalText');
+  const cancel=document.getElementById('cancelSave');
+  const confirm=document.getElementById('confirmSave');
+  title.textContent='Confirmare salvare';
+  text.textContent='Salvezi noile setari ale motorului in memoria flash?';
+  cancel.style.display='block';
+  confirm.textContent='SALVEAZA';
+  confirm.onclick = confirmSaveSettings;
+  modal.className='modal open';
+}
+function closeSaveModal(){
+  const modal=document.getElementById('saveModal');
+  const cancel=document.getElementById('cancelSave');
+  const confirm=document.getElementById('confirmSave');
+  modal.className='modal';
+  cancel.style.display='block';
+  confirm.textContent='SALVEAZA';
+  confirm.onclick = confirmSaveSettings;
+}
+function confirmSaveSettings(){
+  const issues = getSettingsValidationIssues();
+  if(issues.length > 0){
+    showSettingsValidationModal(issues);
+    return;
+  }
+  closeSaveModal();
+  saveSettings();
+}
 function setPresetButtonSelection(value){
   const preset = Number(value || 5);
   document.querySelectorAll('.presetButton').forEach(btn => {
@@ -327,9 +402,6 @@ function loadSettings(){
     updateFeederStatus();
   }).catch(()=>{});
 }
-function askSaveSettings(){playClick();document.getElementById('saveModal').className='modal open';}
-function closeSaveModal(){document.getElementById('saveModal').className='modal';}
-function confirmSaveSettings(){closeSaveModal();saveSettings();}
 function askFirmwareUpdate(){
   const file=document.getElementById('firmwareFile').files[0];
   const msg=document.getElementById('firmwareMsg');
@@ -354,11 +426,17 @@ function uploadFirmware(){
 }
 function saveSettings(){
   const msg=document.getElementById('settingsMsg');
+  const accelField = document.getElementById('accel');
+  const ratioField = document.getElementById('ratio');
   const selectedPreset = document.querySelector('.presetButton.selected')?.dataset.preset || 5;
+  const validatedAccel = clampAccelValue(accelField.value);
+  const validatedRatio = clampRatioValue(ratioField.value);
+  accelField.value = validatedAccel;
+  ratioField.value = validatedRatio;
   const body=new URLSearchParams({
-    acceleration:document.getElementById('accel').value,
+    acceleration:validatedAccel,
     rotationPreset:selectedPreset,
-    gearRatio:document.getElementById('ratio').value,
+    gearRatio:validatedRatio,
     reverse:document.getElementById('reverse').checked?'1':'0'
   });
   fetch('/settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
@@ -366,8 +444,8 @@ function saveSettings(){
     .then(s=>{msg.textContent='Setari salvate';playSuccess();
       const preset = Number(s.rotationPreset ?? 5);
       const clampedPreset = Math.max(4, Math.min(7, preset));
-      document.getElementById('accel').value=s.acceleration;
-      document.getElementById('ratio').value=s.gearRatio;
+      document.getElementById('accel').value=clampAccelValue(s.acceleration);
+      document.getElementById('ratio').value=clampRatioValue(s.gearRatio);
       document.getElementById('reverse').checked=s.reverse;
       setPresetButtonSelection(clampedPreset);})
     .catch(e=>{msg.textContent=e.message;});
@@ -526,7 +604,7 @@ void FeederWebApp::onStatus() {
 }
 
 void FeederWebApp::sendSettings() {
-  const float outputStepsPerRotation = 200.0f * 8.0f * (*deps_.gearRatio);
+  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * (*deps_.gearRatio);
   const float secondsPerRotation = *deps_.motorSpeedStepsPerSecond > 0 ? (outputStepsPerRotation / static_cast<float>(*deps_.motorSpeedStepsPerSecond)) : 0.0f;
   const uint32_t presetValue = deps_.rotationPreset != nullptr
     ? *deps_.rotationPreset
@@ -565,36 +643,29 @@ void FeederWebApp::onPostSettings() {
     ? constrain(static_cast<uint32_t>(server_.arg("rotationPreset").toInt()), 4u, 7u)
     : 5u;
 
+  const uint32_t requestedAcceleration = static_cast<uint32_t>(server_.arg("acceleration").toInt());
+  const float requestedGearRatio = server_.arg("gearRatio").toFloat();
+  Serial.printf("POST settings: accel=%lu gear=%.2f reverse=%s preset=%lu\n",
+                static_cast<unsigned long>(requestedAcceleration),
+                requestedGearRatio,
+                server_.arg("reverse") == "1" ? "true" : "false",
+                static_cast<unsigned long>(requestedPreset));
+
   *deps_.motorAccelerationStepsPerSecond2 = constrain(
-    static_cast<uint32_t>(server_.arg("acceleration").toInt()),
+    requestedAcceleration,
     kMinMotorAccelerationStepsPerSecond2,
     kMaxMotorAccelerationStepsPerSecond2
   );
 
-  const float previousGearRatio = *deps_.gearRatio;
-  *deps_.gearRatio = constrainFloat(server_.arg("gearRatio").toFloat(), kMinGearRatio, kMaxGearRatio);
-  if (*deps_.gearRatio < kMinGearRatio) {
-    *deps_.gearRatio = kMinGearRatio;
-  }
-  if (*deps_.gearRatio > kMaxGearRatio) {
-    *deps_.gearRatio = kMaxGearRatio;
-  }
+  *deps_.gearRatio = constrainFloat(requestedGearRatio, kMinGearRatio, kMaxGearRatio);
   *deps_.reverseRotation = server_.arg("reverse") == "1";
 
-  if (*deps_.gearRatio > 0.0f) {
-    const float outputStepsPerRotation = 200.0f * 8.0f * (*deps_.gearRatio);
-    *deps_.motorSpeedStepsPerSecond = constrain(
-      static_cast<uint32_t>(lroundf(outputStepsPerRotation / static_cast<float>(requestedPreset))),
-      kMinMotorSpeedStepsPerSecond,
-      kMaxMotorSpeedStepsPerSecond
-    );
-  } else {
-    *deps_.motorSpeedStepsPerSecond = constrain(
-      static_cast<uint32_t>(previousGearRatio > 0.0f ? (200.0f * 8.0f * previousGearRatio / static_cast<float>(requestedPreset)) : 400.0f),
-      kMinMotorSpeedStepsPerSecond,
-      kMaxMotorSpeedStepsPerSecond
-    );
-  }
+  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * (*deps_.gearRatio);
+  *deps_.motorSpeedStepsPerSecond = constrain(
+    static_cast<uint32_t>(lroundf(outputStepsPerRotation / static_cast<float>(requestedPreset))),
+    kMinMotorSpeedStepsPerSecond,
+    kMaxMotorSpeedStepsPerSecond
+  );
 
   if (deps_.rotationPreset != nullptr) {
     *deps_.rotationPreset = requestedPreset;

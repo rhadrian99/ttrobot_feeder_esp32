@@ -12,7 +12,6 @@ constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
 constexpr uint32_t DefaultMotorAccelerationStepsPerSecond2 = 1000;
 constexpr float DefaultGearRatio = 1.0f;
 constexpr uint32_t DebounceMillis = 35;
-constexpr uint32_t StatusLedBlinkMillis = 250;
 constexpr uint32_t MinMotorSpeedStepsPerSecond = 1;
 constexpr uint32_t MaxMotorSpeedStepsPerSecond = 20000;
 constexpr uint32_t MinMotorAccelerationStepsPerSecond2 = 100;
@@ -34,13 +33,10 @@ float gearRatio = DefaultGearRatio;
 bool reverseRotation = false;
 
 bool motorRunning = false;
-bool disableMotorWhenStopped = false;
 bool lastButtonReading = HIGH;
 bool debouncedButtonState = HIGH;
 bool statusLedState = LOW;
 uint32_t lastDebounceChangeMillis = 0;
-uint32_t lastStatusLedToggleMillis = 0;
-bool hallActive = false;
 bool lastHallState = false;
 uint32_t rotationsCounter = 0;
 uint32_t lastHallTransitionMillis = 0;
@@ -53,7 +49,6 @@ void loadMotorSettings();
 void saveMotorSettings();
 void writeStatusLed(bool on);
 void updateRotationCounter();
-float constrainFloat(float value, float minimum, float maximum);
 
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
@@ -75,16 +70,6 @@ FeederWebApp::Dependencies buildWebDependencies() {
 
 FeederWebApp webApp(buildWebDependencies());
 
-float constrainFloat(float value, float minimum, float maximum) {
-  if (value < minimum) {
-    return minimum;
-  }
-  if (value > maximum) {
-    return maximum;
-  }
-  return value;
-}
-
 void applyMotorSettings() {
   if (stepper == nullptr) {
     return;
@@ -95,39 +80,65 @@ void applyMotorSettings() {
 }
 
 void updateMotorSpeedFromPreset() {
-  const float stepsPerOutputRotation = 200.0f * 8.0f * gearRatio;
+  const float stepsPerOutputRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * gearRatio;
   const float computedSpeed = stepsPerOutputRotation / static_cast<float>(rotationPreset);
   motorSpeedStepsPerSecond = static_cast<uint32_t>(lroundf(computedSpeed));
   motorSpeedStepsPerSecond = constrain(motorSpeedStepsPerSecond, MinMotorSpeedStepsPerSecond, MaxMotorSpeedStepsPerSecond);
 }
 
 void loadMotorSettings() {
-  preferences.begin("feeder", true);
-  motorSpeedStepsPerSecond = preferences.getUInt("speed", DefaultMotorSpeedStepsPerSecond);
-  motorAccelerationStepsPerSecond2 = preferences.getUInt("accel", DefaultMotorAccelerationStepsPerSecond2);
-  gearRatio = preferences.getFloat("ratio", DefaultGearRatio);
-  reverseRotation = preferences.getBool("reverse", false);
-  rotationPreset = preferences.getUInt("rotationPreset", DefaultRotationPreset);
   preferences.end();
+  const bool opened = preferences.begin("feeder", true);
+  Serial.printf("NVS begin read => %s\n", opened ? "OK" : "FAIL");
+  if (opened) {
+    motorAccelerationStepsPerSecond2 = preferences.getUInt("accel", DefaultMotorAccelerationStepsPerSecond2);
+    gearRatio = preferences.getFloat("ratio", DefaultGearRatio);
+    reverseRotation = preferences.getBool("reverse", false);
+    rotationPreset = preferences.getUInt("rotationPreset", DefaultRotationPreset);
+    preferences.end();
 
-  rotationPreset = constrain(rotationPreset, MinRotationPreset, MaxRotationPreset);
-  motorSpeedStepsPerSecond = constrain(motorSpeedStepsPerSecond, MinMotorSpeedStepsPerSecond, MaxMotorSpeedStepsPerSecond);
-  motorAccelerationStepsPerSecond2 = constrain(motorAccelerationStepsPerSecond2, MinMotorAccelerationStepsPerSecond2, MaxMotorAccelerationStepsPerSecond2);
-  gearRatio = constrainFloat(gearRatio, MinGearRatio, MaxGearRatio);
-
-  if (rotationPreset >= MinRotationPreset && rotationPreset <= MaxRotationPreset) {
-    updateMotorSpeedFromPreset();
+    rotationPreset = constrain(rotationPreset, MinRotationPreset, MaxRotationPreset);
+    motorAccelerationStepsPerSecond2 = constrain(motorAccelerationStepsPerSecond2, MinMotorAccelerationStepsPerSecond2, MaxMotorAccelerationStepsPerSecond2);
+    gearRatio = constrainFloat(gearRatio, MinGearRatio, MaxGearRatio);
+  } else {
+    Serial.println("NVS: niciun setare salvata, folosesc valorile implicite");
+    motorAccelerationStepsPerSecond2 = DefaultMotorAccelerationStepsPerSecond2;
+    gearRatio = DefaultGearRatio;
+    reverseRotation = false;
+    rotationPreset = DefaultRotationPreset;
   }
+
+  updateMotorSpeedFromPreset();
+
+  Serial.printf("NVS load: speed=%lu accel=%lu ratio=%.2f preset=%lu reverse=%s\n",
+                static_cast<unsigned long>(motorSpeedStepsPerSecond),
+                static_cast<unsigned long>(motorAccelerationStepsPerSecond2),
+                gearRatio,
+                static_cast<unsigned long>(rotationPreset),
+                reverseRotation ? "true" : "false");
 }
 
 void saveMotorSettings() {
-  preferences.begin("feeder", false);
-  preferences.putUInt("speed", motorSpeedStepsPerSecond);
+  preferences.end();
+  const bool opened = preferences.begin("feeder", false);
+  Serial.printf("NVS begin write => %s\n", opened ? "OK" : "FAIL");
+  if (!opened) {
+    Serial.println("NVS: nu pot deschide namespace-ul feeder pentru salvare");
+    return;
+  }
+
+  preferences.putUInt("version", 1);
   preferences.putUInt("accel", motorAccelerationStepsPerSecond2);
   preferences.putFloat("ratio", gearRatio);
   preferences.putBool("reverse", reverseRotation);
   preferences.putUInt("rotationPreset", rotationPreset);
   preferences.end();
+  Serial.printf("NVS save: speed=%lu accel=%lu ratio=%.2f preset=%lu reverse=%s\n",
+                static_cast<unsigned long>(motorSpeedStepsPerSecond),
+                static_cast<unsigned long>(motorAccelerationStepsPerSecond2),
+                gearRatio,
+                static_cast<unsigned long>(rotationPreset),
+                reverseRotation ? "true" : "false");
 }
 
 void setMotorEnabled(bool enabled) {
@@ -156,7 +167,6 @@ void toggleMotor() {
   }
 
   if (motorRunning) {
-    disableMotorWhenStopped = false;
     rotationsCounter = 0;
     lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
     lastHallTransitionMillis = 0;
@@ -174,7 +184,6 @@ void toggleMotor() {
     lastHallTransitionMillis = 0;
     lastRotationTimeMs = 0;
     setMotorEnabled(false);
-    disableMotorWhenStopped = false;
   }
 
   Serial.println(motorRunning ? "Motor pornit" : "Motor oprit");
@@ -201,13 +210,6 @@ void updateRotationCounter() {
   lastHallState = currentHallState;
 }
 
-void updateMotorEnable() {
-  if (stepper != nullptr && disableMotorWhenStopped && !stepper->isRunning()) {
-    setMotorEnabled(false);
-    disableMotorWhenStopped = false;
-  }
-}
-
 void updateButton() {
   const bool reading = digitalRead(Pins::Button);
 
@@ -232,18 +234,8 @@ void writeStatusLed(bool on) {
 
 void updateStatusLed() {
   const bool hallReading = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
-  hallActive = hallReading;
-
-  if (!hallReading) {
-    statusLedState = true;
-    writeStatusLed(true);
-    lastStatusLedToggleMillis = millis();
-    return;
-  }
-
-  statusLedState = false;
-  writeStatusLed(false);
-  lastStatusLedToggleMillis = millis();
+  statusLedState = !hallReading;
+  writeStatusLed(!hallReading);
 }
 
 void setup() {
@@ -288,7 +280,6 @@ void setup() {
 void loop() {
   webApp.loop();
   updateButton();
-  updateMotorEnable();
   updateRotationCounter();
   updateStatusLed();
 }
