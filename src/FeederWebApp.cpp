@@ -50,6 +50,10 @@ button:disabled{opacity:.48;cursor:not-allowed}
     <div id="state" class="off">OPRIT</div>
   </section>
   <button id="toggleBtn" onclick="toggleFeeder()">START</button>
+  <div id="jamAlert" class="alert">
+    <div class="alert-icon">⚠️</div>
+    <span id="jamAlertText">Motor blocat! Verifica mecanismul si porneste din nou.</span>
+  </div>
   <div class="meta">
     <div>Clienti WiFi<br><strong id="clients">0</strong></div>
     <div>IP<br><strong id="ip">192.168.4.1</strong></div>
@@ -128,6 +132,10 @@ function poll(){
     document.getElementById('rotations').textContent=Number(d.rotations||0);
     document.getElementById('rotPeriod').textContent=d.rotationPeriodMs!=null?String(d.rotationPeriodMs)+' ms':'0 ms';
     document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
+    document.getElementById('jamAlert').className=d.jammed?'alert show':'alert';
+    document.getElementById('jamAlertText').textContent=d.jammedPermanent
+      ? 'Motor blocat definitiv dupa 2 incercari! Verifica mecanismul si porneste manual.'
+      : 'Motor blocat, se incearca deblocarea automata...';
   }).catch(()=>{});
 }
 document.addEventListener('DOMContentLoaded',()=>{
@@ -588,12 +596,14 @@ void FeederWebApp::onStatus() {
   char ipBuffer[16];
   formatIp(ipBuffer, sizeof(ipBuffer), WiFi.softAPIP());
 
-  char json[260];
+  char json[330];
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"rotations\":%lu,\"rotationPeriodMs\":%lu}",
+    "{\"running\":%s,\"jammed\":%s,\"jammedPermanent\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"rotations\":%lu,\"rotationPeriodMs\":%lu}",
     *deps_.motorRunning ? "true" : "false",
+    (deps_.motorJammed != nullptr && *deps_.motorJammed) ? "true" : "false",
+    (deps_.motorJammedPermanent != nullptr && *deps_.motorJammedPermanent) ? "true" : "false",
     WiFi.softAPgetStationNum(),
     ipBuffer,
     deps_.firmwareVersion,

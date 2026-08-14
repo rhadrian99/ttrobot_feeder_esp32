@@ -10,6 +10,8 @@ class FeederWebApp {
  public:
   struct Dependencies {
     bool *motorRunning = nullptr;
+    bool *motorJammed = nullptr;
+    bool *motorJammedPermanent = nullptr;
     uint32_t *rotationCounter = nullptr;
     uint32_t *rotationPeriodMs = nullptr;
     uint32_t *rotationPreset = nullptr;

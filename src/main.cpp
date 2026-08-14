@@ -21,6 +21,13 @@ constexpr uint32_t MaxRotationPreset = 7;
 constexpr uint32_t DefaultRotationPreset = 5;
 constexpr float MinGearRatio = 1.0f;
 constexpr float MaxGearRatio = 5.0f;
+constexpr uint32_t StallTimeoutMultiplier = 2;
+constexpr uint32_t MinStallTimeoutMs = 3000;
+constexpr float JamRecoveryDegrees = 10.0f;
+constexpr uint8_t JamRecoveryCycles = 3;
+constexpr uint8_t MaxJamAttempts = 2;
+
+enum class JamRecoveryState : uint8_t { Idle, MoveForward, MoveBackward, Finishing };
 
 FastAccelStepperEngine engine;
 FastAccelStepper *stepper = nullptr;
@@ -33,6 +40,12 @@ float gearRatio = DefaultGearRatio;
 bool reverseRotation = false;
 
 bool motorRunning = false;
+bool motorJammed = false;
+bool motorJammedPermanent = false;
+uint32_t motorStartMillis = 0;
+JamRecoveryState jamRecoveryState = JamRecoveryState::Idle;
+uint8_t jamRecoveryCycle = 0;
+uint8_t jamAttemptCount = 0;
 bool lastButtonReading = HIGH;
 bool debouncedButtonState = HIGH;
 bool statusLedState = LOW;
@@ -53,6 +66,8 @@ void updateRotationCounter();
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
   dependencies.motorRunning = &motorRunning;
+  dependencies.motorJammed = &motorJammed;
+  dependencies.motorJammedPermanent = &motorJammedPermanent;
   dependencies.rotationCounter = &rotationsCounter;
   dependencies.rotationPeriodMs = &lastRotationTimeMs;
   dependencies.rotationPreset = &rotationPreset;
@@ -156,9 +171,90 @@ void setMotorEnabled(bool enabled) {
   }
 }
 
-void toggleMotor() {
-  motorRunning = !motorRunning;
+void stopMotor(bool jammed) {
+  if (stepper != nullptr) {
+    stepper->stopMove();
+  }
+  rotationsCounter = 0;
+  lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+  lastHallTransitionMillis = 0;
+  lastRotationTimeMs = 0;
+  setMotorEnabled(false);
+  motorRunning = false;
+  motorJammed = jammed;
+  jamRecoveryState = JamRecoveryState::Idle;
+  jamRecoveryCycle = 0;
+}
 
+void startMotor(bool resetJamAttempts = true) {
+  motorJammed = false;
+  if (resetJamAttempts) {
+    motorJammedPermanent = false;
+    jamAttemptCount = 0;
+  }
+  rotationsCounter = 0;
+  lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
+  lastHallTransitionMillis = 0;
+  lastRotationTimeMs = 0;
+  motorStartMillis = millis();
+  setMotorEnabled(true);
+  if (reverseRotation) {
+    stepper->runBackward();
+  } else {
+    stepper->runForward();
+  }
+  motorRunning = true;
+}
+
+int32_t computeWiggleSteps() {
+  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * gearRatio;
+  return static_cast<int32_t>(lroundf(outputStepsPerRotation * (JamRecoveryDegrees / 360.0f)));
+}
+
+void beginJamRecovery() {
+  stopMotor(true);
+  jamAttemptCount++;
+
+  if (jamAttemptCount >= MaxJamAttempts) {
+    motorJammedPermanent = true;
+    Serial.println("Motor blocat definitiv! A doua blocare consecutiva, necesita interventie manuala.");
+    return;
+  }
+
+  jamRecoveryCycle = 0;
+  jamRecoveryState = JamRecoveryState::MoveForward;
+  setMotorEnabled(true);
+}
+
+void updateJamRecovery() {
+  if (jamRecoveryState == JamRecoveryState::Idle || stepper == nullptr || stepper->isRunning()) {
+    return;
+  }
+
+  const int32_t direction = reverseRotation ? -1 : 1;
+  const int32_t wiggleSteps = computeWiggleSteps();
+
+  switch (jamRecoveryState) {
+    case JamRecoveryState::MoveForward:
+      stepper->move(direction * wiggleSteps);
+      jamRecoveryState = JamRecoveryState::MoveBackward;
+      break;
+    case JamRecoveryState::MoveBackward:
+      stepper->move(-direction * wiggleSteps);
+      jamRecoveryCycle++;
+      jamRecoveryState = jamRecoveryCycle < JamRecoveryCycles ? JamRecoveryState::MoveForward : JamRecoveryState::Finishing;
+      break;
+    case JamRecoveryState::Finishing:
+      jamRecoveryState = JamRecoveryState::Idle;
+      Serial.println("Recuperare finalizata, motor repornit normal.");
+      startMotor(false);
+      break;
+    default:
+      break;
+  }
+}
+
+void toggleMotor() {
   if (stepper == nullptr) {
     Serial.println("Eroare: motorul nu a fost initializat");
     motorRunning = false;
@@ -166,27 +262,18 @@ void toggleMotor() {
     return;
   }
 
-  if (motorRunning) {
-    rotationsCounter = 0;
-    lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
-    lastHallTransitionMillis = 0;
-    lastRotationTimeMs = 0;
-    setMotorEnabled(true);
-    if (reverseRotation) {
-      stepper->runBackward();
-    } else {
-      stepper->runForward();
-    }
-  } else {
-    stepper->stopMove();
-    rotationsCounter = 0;
-    lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
-    lastHallTransitionMillis = 0;
-    lastRotationTimeMs = 0;
-    setMotorEnabled(false);
+  if (jamRecoveryState != JamRecoveryState::Idle) {
+    Serial.println("Recuperare in curs, asteapta finalizarea");
+    return;
   }
 
-  Serial.println(motorRunning ? "Motor pornit" : "Motor oprit");
+  if (motorRunning) {
+    stopMotor(false);
+    Serial.println("Motor oprit");
+  } else {
+    startMotor();
+    Serial.println("Motor pornit");
+  }
 }
 
 void updateRotationCounter() {
@@ -208,6 +295,16 @@ void updateRotationCounter() {
     rotationsCounter++;
   }
   lastHallState = currentHallState;
+
+  // Fara nicio tranzitie Hall in intervalul asteptat => magnetul nu mai trece, motor blocat.
+  const uint32_t expectedRotationMs = rotationPreset * 1000UL;
+  const uint32_t computedTimeoutMs = expectedRotationMs * StallTimeoutMultiplier;
+  const uint32_t stallTimeoutMs = computedTimeoutMs > MinStallTimeoutMs ? computedTimeoutMs : MinStallTimeoutMs;
+  const uint32_t referenceMillis = lastHallTransitionMillis != 0 ? lastHallTransitionMillis : motorStartMillis;
+  if (millis() - referenceMillis > stallTimeoutMs) {
+    Serial.println("Motor blocat! Incep secventa de recuperare.");
+    beginJamRecovery();
+  }
 }
 
 void updateButton() {
@@ -281,5 +378,6 @@ void loop() {
   webApp.loop();
   updateButton();
   updateRotationCounter();
+  updateJamRecovery();
   updateStatusLed();
 }
