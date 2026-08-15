@@ -1,6 +1,6 @@
-# Explicatii proiect ESP32-WROOM feeder
+# Explicatii proiect ESP32 feeder
 
-Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, folosind un ESP32-WROOM / ESP32 DevKit. Motorul este comandat in modul STEP/DIR, iar pornirea si oprirea se fac dintr-un singur buton.
+Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, folosind un ESP32-WROOM / ESP32 DevKit sau un ESP32-C3 SuperMini. Motorul este comandat in modul STEP/DIR, iar pornirea si oprirea se fac dintr-un singur buton.
 
 ## Pe scurt
 
@@ -11,21 +11,33 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, 
 - ESP32-ul creeaza un Access Point WiFi si serveste o aplicatie web la `http://192.168.4.1`.
 - Din aplicatia web se poate porni/opri feederul cu un buton START/STOP.
 - Aplicatia web afiseaza versiunea firmware care ruleaza.
-- Din aplicatia web se pot modifica viteza, acceleratia, ratia reductorului si directia motorului cand feederul este oprit.
+- Din aplicatia web se pot modifica acceleratia, ratia reductorului, timpul unei rotatii si directia motorului cand feederul este oprit.
 - Din aplicatia web se poate incarca un firmware `.bin` nou si flash-ui in slotul OTA liber, cu confirmare inainte de update.
 - Setarile motorului sunt salvate in flash si sunt reincarcate la pornire.
-- LED-ul onboard clipeste la fiecare 2 secunde doar cat timp feederul este pornit; cand feederul este oprit, LED-ul sta stins.
+- Senzorul Hall numara rotatiile reale si permite detectarea unui mecanism blocat.
+- La primul blocaj, firmware-ul incearca automat trei miscari scurte inainte/inapoi, apoi reporneste motorul.
+- La al doilea blocaj consecutiv, motorul ramane oprit pana la interventia utilizatorului.
+- LED-ul onboard indica starea senzorului Hall: se stinge cand magnetul este detectat si se aprinde in rest.
 
 ## Fisiere importante
 
-- `platformio.ini` defineste placa, framework-ul Arduino, viteza seriala si biblioteca `FastAccelStepper`.
+- `platformio.ini` defineste tintele pentru ESP32-WROOM si ESP32-C3 SuperMini, framework-ul Arduino, viteza seriala si biblioteca `FastAccelStepper`.
 - `copy_firmware.py` copiaza firmware-ul compilat in folderul `release`, cu versiunea in nume.
-- `src/main.cpp` contine tot firmware-ul pentru ESP32.
+- `src/main.cpp` contine controlul motorului, citirea butonului si senzorului Hall, precum si recuperarea la blocaj.
+- `src/board_config.h` contine pinii, polaritatile si identitatea OTA specifice fiecarei placi.
+- `src/FeederWebApp.cpp` si `src/FeederWebApp.h` contin Access Point-ul, serverul HTTP, interfata web si update-ul OTA.
 - `README.md` contine schema de conectare si comenzile de build/upload.
 
 ## Configuratia PlatformIO
 
-Mediul folosit este `esp32-wroom`, cu placa `esp32dev`. Aceasta tinta PlatformIO este potrivita pentru multe placi ESP32-WROOM / ESP32 DevKit clasice.
+Proiectul are doua medii PlatformIO:
+
+| Mediu | Placa PlatformIO | Hardware |
+| --- | --- | --- |
+| `esp32-wroom` | `esp32dev` | ESP32-WROOM / ESP32 DevKit clasic |
+| `esp32-c3-supermini` | `lolin_c3_mini` | ESP32-C3 SuperMini |
+
+Mediul implicit este `esp32-c3-supermini`. Pentru WROOM trebuie selectat explicit mediul `esp32-wroom` la build sau upload.
 
 Schema de partitii este `min_spiffs.csv`. Ea imparte flash-ul de 4 MB in doua sloturi OTA mari si o zona SPIFFS mica:
 
@@ -40,7 +52,7 @@ Schema de partitii este `min_spiffs.csv`. Ea imparte flash-ul de 4 MB in doua sl
 
 Aceasta partitionare pregateste proiectul pentru update firmware via web: firmware-ul curent ruleaza dintr-un slot, iar noul `.bin` poate fi scris in celalalt slot. Dupa restart, bootloader-ul poate porni noua versiune.
 
-Schimbarea schemei de partitii trebuie incarcata o data prin USB, deoarece partition table-ul este scris separat de aplicatie. Dupa aceea, se poate implementa endpoint-ul OTA in aplicatia web.
+Schimbarea schemei de partitii trebuie incarcata o data prin USB, deoarece partition table-ul este scris separat de aplicatie. Dupa aceea, endpoint-ul OTA existent poate actualiza firmware-ul din aplicatia web.
 
 Biblioteca principala este:
 
@@ -88,6 +100,7 @@ Rutele principale sunt:
 | Ruta | Metoda | Rol |
 | --- | --- | --- |
 | `/` | GET | Serveste aplicatia web |
+| `/settings-page` | GET | Serveste pagina separata de setari si update firmware |
 | `/status` | GET | Returneaza JSON cu starea feederului |
 | `/settings` | GET | Returneaza setarile salvate ale motorului |
 | `/settings` | POST | Salveaza setarile motorului daca feederul este oprit |
@@ -100,15 +113,29 @@ Rutele de captive portal (`/generate_204`, `/hotspot-detect.html`, `/ncsi.txt` e
 
 ## Pini folositi
 
+### ESP32-WROOM
+
 | Pin ESP32-WROOM | Rol |
 | --- | --- |
 | GPIO25 | STEP catre TMC2208 |
 | GPIO26 | DIR catre TMC2208 |
 | GPIO27 | ENABLE catre TMC2208 |
 | GPIO14 | Buton catre GND |
+| GPIO4 | Semnal senzor Hall, activ pe LOW |
 | LED_BUILTIN / GPIO2 fallback | LED onboard |
 
 GPIO6-GPIO11 nu sunt folositi deoarece pe modulele ESP32-WROOM sunt legati de memoria flash interna. Folosirea lor pentru cablaj extern poate bloca pornirea placii sau poate duce la comportament instabil.
+
+### ESP32-C3 SuperMini
+
+| Pin ESP32-C3 | Rol |
+| --- | --- |
+| GPIO7 | STEP catre TMC2208 |
+| GPIO6 | DIR catre TMC2208 |
+| GPIO10 | ENABLE catre TMC2208 |
+| GPIO5 | Buton catre GND |
+| GPIO4 | Semnal senzor Hall, activ pe LOW |
+| GPIO8 | LED onboard, activ pe LOW |
 
 ## Cum functioneaza codul
 
@@ -116,29 +143,53 @@ GPIO6-GPIO11 nu sunt folositi deoarece pe modulele ESP32-WROOM sunt legati de me
 
 In `namespace Pins` sunt definite toate conexiunile hardware. Daca placa nu defineste `LED_BUILTIN`, codul foloseste GPIO2 ca fallback, fiind pinul uzual pentru LED-ul onboard pe multe placi ESP32 DevKit.
 
-Valorile implicite pentru motor sunt `400` pasi pe secunda, `1000` pasi pe secunda la patrat si ratie reductor `1`. Acestea sunt folosite doar daca nu exista valori salvate in flash.
+Valorile implicite sunt acceleratie `1000` pasi/s^2, ratie reductor `1` si preset `5` secunde pentru o rotatie la iesire. Motorul este configurat pentru `200` pasi/rotatie si microstepping `1/8`, adica `1600` impulsuri STEP pentru o rotatie a axului motorului.
+
+Viteza este calculata automat, nu mai este salvata direct:
+
+```text
+pasi_rotatie_iesire = 200 * 8 * ratie_reductor
+viteza_pasi_secunda = pasi_rotatie_iesire / secunde_per_rotatie
+```
+
+De exemplu, pentru ratie `1` si preset `5 s`, viteza este `1600 / 5 = 320 pasi/s`.
 
 La pornire, `loadMotorSettings()` citeste din namespace-ul NVS `feeder` urmatoarele chei:
 
 | Cheie | Variabila | Valoare implicita |
 | --- | --- | --- |
-| `speed` | `motorSpeedStepsPerSecond` | `400` |
 | `accel` | `motorAccelerationStepsPerSecond2` | `1000` |
 | `ratio` | `gearRatio` | `1.0` |
 | `reverse` | `reverseRotation` | `false` |
+| `rotationPreset` | `rotationPreset` | `5` secunde/rotatie |
 
 La salvare, `saveMotorSettings()` scrie aceleasi valori in flash. Valorile sunt limitate intre praguri minime si maxime inainte de aplicare.
 
-Debounce-ul butonului este de `35 ms`, iar LED-ul isi schimba starea la fiecare `2000 ms` cand feederul este pornit.
+Debounce-ul butonului este de `35 ms`. Presetul este limitat la `4-7` secunde/rotatie, acceleratia la `100-16000` pasi/s^2, iar ratia reductorului la `1-5`.
 
 ### Pornirea si oprirea motorului
 
 Functia `toggleMotor()` inverseaza starea motorului:
 
 - daca motorul era oprit, activeaza iesirile driverului si porneste miscarea cu `runForward()` sau `runBackward()`, in functie de setarea de directie;
-- daca motorul era pornit, cere oprirea cu `stopMove()` si marcheaza driverul pentru dezactivare dupa ce motorul chiar s-a oprit.
+- daca motorul era pornit, cere oprirea cu `stopMove()` si dezactiveaza iesirile driverului.
 
-Dezactivarea driverului dupa oprire este gestionata de `updateMotorEnable()`. Asta evita taierea brusca a iesirilor inainte ca libraria sa termine oprirea miscarii.
+Driverul este dezactivat si la pornirea placii. Astfel, bobinele motorului nu raman alimentate inutil cand feederul este oprit, ceea ce reduce incalzirea motorului si a driverului.
+
+### Senzor Hall si detectarea blocajului
+
+Senzorul Hall este configurat cu `INPUT_PULLUP` si este activ pe `LOW`. O trecere a magnetului prin fata senzorului este considerata o rotatie completa a mecanismului. Firmware-ul numara fronturile inactive-active si masoara timpul dintre doua rotatii.
+
+Timeout-ul de blocaj este de doua ori perioada selectata, dar niciodata mai mic de `3000 ms`. Pentru presetul de `5 s/rotatie`, lipsa unui impuls Hall timp de peste `10 s` declanseaza recuperarea.
+
+La primul blocaj, secventa automata este:
+
+1. motorul este oprit si driverul este dezactivat temporar;
+2. driverul este reactivat;
+3. motorul executa trei cicluri de aproximativ `15` grade inainte si inapoi;
+4. motorul reporneste in directia normala.
+
+Daca apare inca un blocaj inainte ca senzorul Hall sa confirme o rotatie reusita, firmware-ul seteaza starea de blocaj permanent si asteapta o pornire manuala. O rotatie confirmata reseteaza contorul de incercari.
 
 ### Butonul
 
@@ -148,41 +199,36 @@ Functia `updateButton()` face debounce software. Ea accepta schimbarea de stare 
 
 ### LED-ul onboard
 
-Functia `updateStatusLed()` foloseste `millis()` pentru temporizare. Nu foloseste `delay()`, deci nu blocheaza citirea butonului, serverul web sau controlul motorului.
-
-LED-ul ramane stins cand `motorRunning` este `false`. Cand feederul este pornit, LED-ul isi schimba starea la fiecare 2 secunde.
+Functia `updateStatusLed()` urmareste direct senzorul Hall. LED-ul este stins cat timp magnetul este detectat si aprins in rest. Codul tine cont de polaritatea diferita a LED-ului: activ pe HIGH la WROOM si activ pe LOW la C3 SuperMini.
 
 ### Bucla principala
 
-`loop()` ruleaza continuu trei actualizari rapide:
+`loop()` ruleaza continuu actualizari rapide si neblocante:
 
 ```cpp
+webApp.loop();
 updateButton();
-updateMotorEnable();
+updateRotationCounter();
+updateJamRecovery();
 updateStatusLed();
 ```
 
-Inainte de acestea, bucla proceseaza cererile DNS si HTTP:
-
-```cpp
-dnsServer.processNextRequest();
-server.handleClient();
-```
-
-Aceasta structura este buna pentru firmware simplu deoarece fiecare functie face putin lucru si revine imediat.
+`webApp.loop()` proceseaza cererile DNS si HTTP, verifica periodic Access Point-ul si executa restartul programat dupa un update OTA. Aceasta structura lasa controlul motorului si monitorizarea Hall sa ruleze fara intarzieri lungi.
 
 ### Setarile din web UI
 
 Sectiunea de setari din pagina web contine:
 
 - acceleratia motorului, implicit `1000` pasi/s^2;
-- viteza motorului, implicit `400` pasi/s;
 - ratia reductorului, implicit `1`;
+- presetul pentru perioada unei rotatii: `4`, `5`, `6` sau `7` secunde;
 - un switch pentru inversarea directiei de rotatie.
 
 Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint-ul `/settings` refuza si el salvarea cu status `409` daca feederul ruleaza, deci protectia exista si in firmware, nu doar in interfata.
 
-Ratia reductorului este salvata in flash pentru folosire ulterioara. In varianta actuala nu schimba inca formula vitezei motorului; viteza introdusa ramane viteza motorului in pasi pe secunda.
+Ratia reductorului si presetul schimba viteza calculata a motorului. Endpoint-ul `/settings` returneaza atat viteza rezultata in pasi/s, cat si perioada calculata in secunde/rotatie.
+
+Pagina principala afiseaza numarul de rotatii, perioada ultimei rotatii si avertizarea de blocaj. Campul `jammedPermanent` diferentiaza recuperarea automata in curs de situatia care necesita verificarea manuala a mecanismului.
 
 ### Update firmware din web UI
 
@@ -194,36 +240,54 @@ Sectiunea este dezactivata in interfata cat timp `motorRunning` este `true`, iar
 
 ## Observatii de review
 
-Codul este potrivit pentru scopul actual: simplu, neblocant si usor de modificat. Separarea functiilor face clar ce parte controleaza motorul, ce parte citeste butonul si ce parte clipeste LED-ul.
+Codul este potrivit pentru scopul actual: simplu, neblocant si usor de modificat. Separarea functiilor face clar ce parte controleaza motorul, ce parte citeste butonul si senzorul Hall si ce parte gestioneaza aplicatia web.
 
 Puncte bune:
 
 - foloseste `FastAccelStepper` in loc sa genereze manual impulsuri STEP;
 - foloseste `millis()` pentru LED si debounce, fara `delay()`;
 - tine driverul dezactivat la pornire;
+- dezactiveaza driverul cand motorul este oprit, reducand incalzirea in repaus;
+- verifica rotatia reala cu senzorul Hall, nu presupune ca impulsurile STEP au miscat mecanismul;
+- incearca o recuperare limitata si trece in stare de eroare dupa doua blocari consecutive;
 - nu foloseste GPIO6-GPIO11 pe ESP32-WROOM;
 - butonul foloseste pull-up intern, deci necesita cablaj minim.
 
 Riscuri / lucruri de verificat pe placa reala:
 
-- LED-ul onboard poate fi pe alt pin sau poate lipsi pe unele placi ESP32-WROOM; daca nu clipeste, trebuie verificat pinul LED-ului placii.
-- Unele placi au LED activ pe `LOW`, caz in care clipirea exista, dar starea aprins/stins este inversata.
+- LED-ul onboard poate fi pe alt pin sau poate lipsi pe unele placi ESP32-WROOM; daca nu urmareste senzorul Hall, trebuie verificat pinul si polaritatea LED-ului placii.
 - Daca driverul TMC2208 are pinul `EN` configurat diferit, `EnableActiveLevel` poate trebui schimbat din `LOW` in `HIGH`.
 - Viteza si acceleratia sunt conservative, dar trebuie ajustate dupa mecanica, tensiune, curentul driverului si microstepping.
 - Butonul nu are rezistor extern sau condensator de filtrare; debounce-ul software este suficient pentru test, dar la fire lungi poate fi nevoie de filtrare hardware.
+- Senzorul Hall trebuie montat astfel incat sa produca un singur impuls clar la fiecare rotatie; zgomotul sau mai multi magneti vor altera numaratoarea si detectarea blocajului.
+
+## Daca motorul sau driverul se incalzeste prea tare
+
+Un motor pas cu pas se poate incalzi in functionare normala, dar temperatura trebuie sa ramana sub limita din fisa sa tehnica. Pentru diagnostic si reducerea temperaturii:
+
+1. Regleaza limita de curent a TMC2208 din `VREF`, conform curentului nominal al motorului si rezistentei `R_SENSE` de pe modul. Nu folosi curentul maxim al driverului ca tinta.
+2. Verifica faptul ca pinul ENABLE functioneaza si ca driverul chiar dezactiveaza bobinele cand feederul este oprit.
+3. Verifica blocajele mecanice, alinierea axului, frecarea, sarcina si acceleratia. Un mecanism greu sau blocat mentine motorul solicitat si poate declansa repetat recuperarea.
+4. Monteaza radiator pe TMC2208 si asigura ventilatie in carcasa. Daca driverul intra in protectie termica, motorul poate pierde pasi.
+5. Verifica tensiunea sursei, conexiunile bobinelor si masa comuna. Nu conecta sau deconecta motorul cat timp driverul este alimentat.
+6. Masoara temperatura cu un termometru. Aproximativ `50-60 C` poate fi normal pentru multe motoare pas cu pas; la `70-80 C` este prudent sa reduci curentul si sa verifici fisa tehnica a motorului.
+
+Dezactivarea software implementata ajuta doar cand feederul este oprit. In timpul functionarii continue, masura principala ramane reglarea corecta a curentului TMC2208, urmata de eliminarea frecarilor si racirea driverului.
 
 ## Comenzi utile
 
 Build:
 
 ```powershell
-pio run
+pio run --environment esp32-wroom
+pio run --environment esp32-c3-supermini
 ```
 
 Upload:
 
 ```powershell
 pio run --target upload --environment esp32-wroom
+pio run --target upload --environment esp32-c3-supermini
 ```
 
 Monitor serial:

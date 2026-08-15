@@ -23,7 +23,7 @@ constexpr float MinGearRatio = 1.0f;
 constexpr float MaxGearRatio = 5.0f;
 constexpr uint32_t StallTimeoutMultiplier = 2;
 constexpr uint32_t MinStallTimeoutMs = 3000;
-constexpr float JamRecoveryDegrees = 10.0f;
+constexpr float JamRecoveryDegrees = 15.0f;
 constexpr uint8_t JamRecoveryCycles = 3;
 constexpr uint8_t MaxJamAttempts = 2;
 
@@ -293,6 +293,8 @@ void updateRotationCounter() {
     }
     lastHallTransitionMillis = now;
     rotationsCounter++;
+    // Rotatie reala confirmata dupa recuperare => mecanismul functioneaza, resetam contorul de blocari.
+    jamAttemptCount = 0;
   }
   lastHallState = currentHallState;
 
