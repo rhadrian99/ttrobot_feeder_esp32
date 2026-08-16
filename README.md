@@ -18,7 +18,7 @@ Adresa: http://192.168.4.1
 
 Sufixul `XXXX` este generat din identificatorul cipului, ca sa fie mai usor de distins daca ai mai multe placi.
 
-Pagina web include buton START/STOP, afiseaza starea curenta a feederului, versiunea firmware care ruleaza si are o sectiune de setari pentru motor. Butonul fizic si butonul web controleaza aceeasi stare.
+Pagina web include buton START/STOP, afiseaza starea curenta a feederului, versiunea firmware care ruleaza si are o sectiune de setari pentru motor. Butonul fizic si butonul web controleaza aceeasi stare. Cand motorul ruleaza, pagina principala afiseaza timpul ramas in format `MM:SS` si o bara de progres pana la oprirea automata.
 
 Sectiunea de setari este activa doar cand feederul este oprit. Cand motorul se invarte, campurile sunt blocate ca sa nu se schimbe viteza, acceleratia sau directia in timpul miscarii.
 
@@ -30,6 +30,7 @@ Setarile salvate in flash sunt:
 | Viteza | `400` pasi/s | Viteza motorului |
 | Ratie reductor | `1` | Valoare persistenta pentru un reductor montat ulterior |
 | Directie inversata | dezactivat | Schimba sensul de rotatie al motorului |
+| Oprire automata | `20` minute | Opreste motorul dupa `10`, `15` sau `20` minute pentru a limita incalzirea |
 
 Aceste valori sunt citite din flash la pornirea ESP32-ului. Daca nu exista inca valori salvate, firmware-ul foloseste valorile implicite.
 
@@ -74,13 +75,14 @@ Instaleaza extensia VS Code **PlatformIO IDE** sau PlatformIO CLI. Dupa instalar
 Versiunea firmware este definita in [src/main.cpp](src/main.cpp):
 
 ```cpp
-#define FW_VERSION "1.0.3"
+#define FW_VERSION "1.0.6"
 ```
 
-La fiecare build, scriptul [copy_firmware.py](copy_firmware.py) copiaza automat binarul compilat in folderul `release`, cu versiunea in nume. De exemplu, versiunea `1.0.3` genereaza:
+La fiecare build, scriptul [copy_firmware.py](copy_firmware.py) copiaza automat binarul compilat in folderul `release`, cu versiunea si placa in nume. Versiunea `1.0.6` genereaza:
 
 ```text
-release/firmware103.bin
+release/firmware106_c3-supermini.bin
+release/firmware106_wroom.bin
 ```
 
 Pentru o versiune noua, modifica `FW_VERSION`, ruleaza build-ul si foloseste binarul nou din `release`.

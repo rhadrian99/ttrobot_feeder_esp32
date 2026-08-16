@@ -5,7 +5,7 @@
 #include "FeederWebApp.h"
 #include "board_config.h"
 
-#define FW_VERSION "1.0.4"
+#define FW_VERSION "1.0.6"
 
 constexpr bool EnableActiveLevel = LOW;
 constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
@@ -26,6 +26,7 @@ constexpr uint32_t MinStallTimeoutMs = 3000;
 constexpr float JamRecoveryDegrees = 15.0f;
 constexpr uint8_t JamRecoveryCycles = 3;
 constexpr uint8_t MaxJamAttempts = 2;
+constexpr uint32_t DefaultMotorRunDurationMinutes = 20;
 
 enum class JamRecoveryState : uint8_t { Idle, MoveForward, MoveBackward, Finishing };
 
@@ -38,11 +39,14 @@ uint32_t motorAccelerationStepsPerSecond2 = DefaultMotorAccelerationStepsPerSeco
 uint32_t rotationPreset = DefaultRotationPreset;
 float gearRatio = DefaultGearRatio;
 bool reverseRotation = false;
+uint32_t motorRunDurationMinutes = DefaultMotorRunDurationMinutes;
 
 bool motorRunning = false;
 bool motorJammed = false;
 bool motorJammedPermanent = false;
 uint32_t motorStartMillis = 0;
+uint32_t motorSessionStartMillis = 0;
+bool motorSessionActive = false;
 JamRecoveryState jamRecoveryState = JamRecoveryState::Idle;
 uint8_t jamRecoveryCycle = 0;
 uint8_t jamAttemptCount = 0;
@@ -62,6 +66,7 @@ void loadMotorSettings();
 void saveMotorSettings();
 void writeStatusLed(bool on);
 void updateRotationCounter();
+void updateMotorRunTimer();
 
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
@@ -75,6 +80,9 @@ FeederWebApp::Dependencies buildWebDependencies() {
   dependencies.motorAccelerationStepsPerSecond2 = &motorAccelerationStepsPerSecond2;
   dependencies.gearRatio = &gearRatio;
   dependencies.reverseRotation = &reverseRotation;
+  dependencies.motorRunDurationMinutes = &motorRunDurationMinutes;
+  dependencies.motorSessionStartMillis = &motorSessionStartMillis;
+  dependencies.motorSessionActive = &motorSessionActive;
   dependencies.firmwareVersion = FW_VERSION;
   dependencies.saveMotorSettings = &saveMotorSettings;
   dependencies.applyMotorSettings = &applyMotorSettings;
@@ -110,17 +118,22 @@ void loadMotorSettings() {
     gearRatio = preferences.getFloat("ratio", DefaultGearRatio);
     reverseRotation = preferences.getBool("reverse", false);
     rotationPreset = preferences.getUInt("rotationPreset", DefaultRotationPreset);
+    motorRunDurationMinutes = preferences.getUInt("runMinutes", DefaultMotorRunDurationMinutes);
     preferences.end();
 
     rotationPreset = constrain(rotationPreset, MinRotationPreset, MaxRotationPreset);
     motorAccelerationStepsPerSecond2 = constrain(motorAccelerationStepsPerSecond2, MinMotorAccelerationStepsPerSecond2, MaxMotorAccelerationStepsPerSecond2);
     gearRatio = constrainFloat(gearRatio, MinGearRatio, MaxGearRatio);
+    if (motorRunDurationMinutes != 10 && motorRunDurationMinutes != 15 && motorRunDurationMinutes != 20) {
+      motorRunDurationMinutes = DefaultMotorRunDurationMinutes;
+    }
   } else {
     Serial.println("NVS: niciun setare salvata, folosesc valorile implicite");
     motorAccelerationStepsPerSecond2 = DefaultMotorAccelerationStepsPerSecond2;
     gearRatio = DefaultGearRatio;
     reverseRotation = false;
     rotationPreset = DefaultRotationPreset;
+    motorRunDurationMinutes = DefaultMotorRunDurationMinutes;
   }
 
   updateMotorSpeedFromPreset();
@@ -147,6 +160,7 @@ void saveMotorSettings() {
   preferences.putFloat("ratio", gearRatio);
   preferences.putBool("reverse", reverseRotation);
   preferences.putUInt("rotationPreset", rotationPreset);
+  preferences.putUInt("runMinutes", motorRunDurationMinutes);
   preferences.end();
   Serial.printf("NVS save: speed=%lu accel=%lu ratio=%.2f preset=%lu reverse=%s\n",
                 static_cast<unsigned long>(motorSpeedStepsPerSecond),
@@ -191,6 +205,8 @@ void startMotor(bool resetJamAttempts = true) {
   if (resetJamAttempts) {
     motorJammedPermanent = false;
     jamAttemptCount = 0;
+    motorSessionStartMillis = millis();
+    motorSessionActive = true;
   }
   rotationsCounter = 0;
   lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
@@ -217,6 +233,7 @@ void beginJamRecovery() {
 
   if (jamAttemptCount >= MaxJamAttempts) {
     motorJammedPermanent = true;
+    motorSessionActive = false;
     Serial.println("Motor blocat definitiv! A doua blocare consecutiva, necesita interventie manuala.");
     return;
   }
@@ -269,11 +286,28 @@ void toggleMotor() {
 
   if (motorRunning) {
     stopMotor(false);
+    motorSessionActive = false;
     Serial.println("Motor oprit");
   } else {
     startMotor();
     Serial.println("Motor pornit");
   }
+}
+
+void updateMotorRunTimer() {
+  if (!motorSessionActive) {
+    return;
+  }
+
+  const uint32_t runDurationMillis = motorRunDurationMinutes * 60UL * 1000UL;
+  if (millis() - motorSessionStartMillis < runDurationMillis) {
+    return;
+  }
+
+  motorSessionActive = false;
+  stopMotor(false);
+  Serial.printf("Motor oprit automat dupa %lu minute pentru protectie termica.\n",
+                static_cast<unsigned long>(motorRunDurationMinutes));
 }
 
 void updateRotationCounter() {
@@ -381,5 +415,6 @@ void loop() {
   updateButton();
   updateRotationCounter();
   updateJamRecovery();
+  updateMotorRunTimer();
   updateStatusLed();
 }

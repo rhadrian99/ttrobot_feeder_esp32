@@ -27,6 +27,13 @@ h1{font-size:26px;text-align:center;margin-bottom:8px;color:#f9c74f;letter-spaci
 .label{font-size:12px;color:#8ea4ba;margin-bottom:6px;text-transform:uppercase}
 #state{font-size:34px;font-weight:700;color:#90be6d}
 #state.off{color:#f94144}
+.runTimer{border:1px solid #314052;background:#111b25;border-radius:8px;padding:12px;margin-bottom:14px}
+.timerRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#8ea4ba;font-size:12px;text-transform:uppercase}
+#timerText{color:#f4f0e8;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+.progressTrack{height:12px;background:#0b1219;border:1px solid #314052;border-radius:6px;overflow:hidden}
+#timerProgress{width:0;height:100%;background:#90be6d;transition:width .4s linear,background-color .2s}
+#timerProgress.warning{background:#f9c74f}
+#timerProgress.critical{background:#f94144}
 button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-weight:700;color:#101820;background:#90be6d;cursor:pointer;touch-action:manipulation;margin-top:10px}
 button.off{background:#f94144;color:#fff}
 button.secondary{background:#5a7c99;color:#f4f0e8;font-size:16px}
@@ -48,6 +55,15 @@ button:disabled{opacity:.48;cursor:not-allowed}
   <section class="status">
     <div class="label">Stare feeder</div>
     <div id="state" class="off">OPRIT</div>
+  </section>
+  <section class="runTimer">
+    <div class="timerRow">
+      <span>Timp pana la oprire</span>
+      <strong id="timerText">--:--</strong>
+    </div>
+    <div id="timerTrack" class="progressTrack" role="progressbar" aria-label="Timp ramas" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div id="timerProgress"></div>
+    </div>
   </section>
   <button id="toggleBtn" onclick="toggleFeeder()">START</button>
   <div id="jamAlert" class="alert">
@@ -117,6 +133,11 @@ function playError(){
   osc.stop(t+0.3);
 }
 function toggleFeeder(){playClick();fetch('/toggle',{method:'POST'}).then(poll).catch(()=>{});}
+function formatRemainingTime(totalSeconds){
+  const seconds=Math.max(0,Number(totalSeconds)||0);
+  const minutes=Math.floor(seconds/60);
+  return String(minutes).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');
+}
 function poll(){
   fetch('/status').then(r=>r.json()).then(d=>{
     const state=document.getElementById('state');
@@ -131,6 +152,15 @@ function poll(){
     document.getElementById('ip').textContent=d.ip;
     document.getElementById('rotations').textContent=Number(d.rotations||0);
     document.getElementById('rotPeriod').textContent=d.rotationPeriodMs!=null?String(d.rotationPeriodMs)+' ms':'0 ms';
+    const timerActive=Boolean(d.timerActive);
+    const totalSeconds=Number(d.runDurationSeconds||0);
+    const remainingSeconds=Number(d.runRemainingSeconds||0);
+    const progressPercent=timerActive&&totalSeconds>0?Math.max(0,Math.min(100,remainingSeconds/totalSeconds*100)):0;
+    const timerProgress=document.getElementById('timerProgress');
+    document.getElementById('timerText').textContent=timerActive?formatRemainingTime(remainingSeconds):'--:--';
+    timerProgress.style.width=progressPercent+'%';
+    timerProgress.className=progressPercent<=20?'critical':progressPercent<=50?'warning':'';
+    document.getElementById('timerTrack').setAttribute('aria-valuenow',String(Math.round(progressPercent)));
     document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
     document.getElementById('jamAlert').className=d.jammed?'alert show':'alert';
     document.getElementById('jamAlertText').textContent=d.jammedPermanent
@@ -188,6 +218,9 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
 .presetGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .presetButton{width:100%;padding:12px 8px;border:1px solid #314052;border-radius:8px;background:#111b25;color:#f4f0e8;font-size:18px;font-weight:700;cursor:pointer}
 .presetButton.selected{background:#f9c74f;color:#101820;border-color:#f9c74f}
+.timerGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.timerButton{width:100%;padding:12px 8px;border:1px solid #314052;border-radius:8px;background:#111b25;color:#f4f0e8;font-size:16px;font-weight:700;cursor:pointer}
+.timerButton.selected{background:#f9c74f;color:#101820;border-color:#f9c74f}
 #settingsMsg,#firmwareMsg{min-height:18px;margin-top:8px;color:#9fb3c8;font-size:12px;text-align:center}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;place-items:center;padding:18px;z-index:5}
 .modal.open{display:grid}
@@ -224,6 +257,14 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
           <button type="button" class="presetButton selected" data-preset="5">5s</button>
           <button type="button" class="presetButton" data-preset="6">6s</button>
           <button type="button" class="presetButton" data-preset="7">7s</button>
+        </div>
+      </div>
+      <div class="presetBlock">
+        <div class="presetLabel">Oprire automata</div>
+        <div class="timerGrid">
+          <button type="button" class="timerButton" data-minutes="10">10 min</button>
+          <button type="button" class="timerButton" data-minutes="15">15 min</button>
+          <button type="button" class="timerButton selected" data-minutes="20">20 min</button>
         </div>
       </div>
       <div class="switchRow">
@@ -398,6 +439,12 @@ function setPresetButtonSelection(value){
     btn.classList.toggle('selected', Number(btn.dataset.preset) === preset);
   });
 }
+function setTimerButtonSelection(value){
+  const minutes = Number(value || 20);
+  document.querySelectorAll('.timerButton').forEach(btn => {
+    btn.classList.toggle('selected', Number(btn.dataset.minutes) === minutes);
+  });
+}
 function loadSettings(){
   fetch('/settings').then(r=>r.json()).then(s=>{
     const preset = Number(s.rotationPreset ?? 5);
@@ -407,6 +454,7 @@ function loadSettings(){
     document.getElementById('ratio').value=s.gearRatio;
     document.getElementById('reverse').checked=s.reverse;
     setPresetButtonSelection(clampedPreset);
+    setTimerButtonSelection(s.runDurationMinutes ?? 20);
     updateFeederStatus();
   }).catch(()=>{});
 }
@@ -437,6 +485,7 @@ function saveSettings(){
   const accelField = document.getElementById('accel');
   const ratioField = document.getElementById('ratio');
   const selectedPreset = document.querySelector('.presetButton.selected')?.dataset.preset || 5;
+  const selectedRunDuration = document.querySelector('.timerButton.selected')?.dataset.minutes || 20;
   const validatedAccel = clampAccelValue(accelField.value);
   const validatedRatio = clampRatioValue(ratioField.value);
   accelField.value = validatedAccel;
@@ -444,6 +493,7 @@ function saveSettings(){
   const body=new URLSearchParams({
     acceleration:validatedAccel,
     rotationPreset:selectedPreset,
+    runDurationMinutes:selectedRunDuration,
     gearRatio:validatedRatio,
     reverse:document.getElementById('reverse').checked?'1':'0'
   });
@@ -455,7 +505,8 @@ function saveSettings(){
       document.getElementById('accel').value=clampAccelValue(s.acceleration);
       document.getElementById('ratio').value=clampRatioValue(s.gearRatio);
       document.getElementById('reverse').checked=s.reverse;
-      setPresetButtonSelection(clampedPreset);})
+      setPresetButtonSelection(clampedPreset);
+      setTimerButtonSelection(s.runDurationMinutes ?? 20);})
     .catch(e=>{msg.textContent=e.message;});
 }
 function updateFeederStatus(){
@@ -474,6 +525,11 @@ document.addEventListener('DOMContentLoaded',()=>{
     btn.addEventListener('click', () => {
       const preset = Number(btn.dataset.preset || 5);
       setPresetButtonSelection(preset);
+    });
+  });
+  document.querySelectorAll('.timerButton').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setTimerButtonSelection(btn.dataset.minutes);
     });
   });
 });
@@ -596,11 +652,24 @@ void FeederWebApp::onStatus() {
   char ipBuffer[16];
   formatIp(ipBuffer, sizeof(ipBuffer), WiFi.softAPIP());
 
-  char json[330];
+  const bool timerActive = deps_.motorSessionActive != nullptr && *deps_.motorSessionActive;
+  const uint32_t runDurationSeconds = deps_.motorRunDurationMinutes != nullptr
+    ? *deps_.motorRunDurationMinutes * 60UL
+    : 20UL * 60UL;
+  uint32_t runRemainingSeconds = 0;
+  if (timerActive && deps_.motorSessionStartMillis != nullptr) {
+    const uint32_t elapsedMillis = millis() - *deps_.motorSessionStartMillis;
+    const uint32_t durationMillis = runDurationSeconds * 1000UL;
+    runRemainingSeconds = elapsedMillis < durationMillis
+      ? (durationMillis - elapsedMillis + 999UL) / 1000UL
+      : 0;
+  }
+
+  char json[430];
   snprintf(
     json,
     sizeof(json),
-    "{\"running\":%s,\"jammed\":%s,\"jammedPermanent\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"rotations\":%lu,\"rotationPeriodMs\":%lu}",
+    "{\"running\":%s,\"jammed\":%s,\"jammedPermanent\":%s,\"clients\":%d,\"ip\":\"%s\",\"version\":\"%s\",\"rotations\":%lu,\"rotationPeriodMs\":%lu,\"timerActive\":%s,\"runDurationSeconds\":%lu,\"runRemainingSeconds\":%lu}",
     *deps_.motorRunning ? "true" : "false",
     (deps_.motorJammed != nullptr && *deps_.motorJammed) ? "true" : "false",
     (deps_.motorJammedPermanent != nullptr && *deps_.motorJammedPermanent) ? "true" : "false",
@@ -608,7 +677,10 @@ void FeederWebApp::onStatus() {
     ipBuffer,
     deps_.firmwareVersion,
     deps_.rotationCounter != nullptr ? static_cast<unsigned long>(*deps_.rotationCounter) : 0UL,
-    deps_.rotationPeriodMs != nullptr ? static_cast<unsigned long>(*deps_.rotationPeriodMs) : 0UL
+    deps_.rotationPeriodMs != nullptr ? static_cast<unsigned long>(*deps_.rotationPeriodMs) : 0UL,
+    timerActive ? "true" : "false",
+    static_cast<unsigned long>(runDurationSeconds),
+    static_cast<unsigned long>(runRemainingSeconds)
   );
   server_.send(200, "application/json", json);
 }
@@ -619,17 +691,18 @@ void FeederWebApp::sendSettings() {
   const uint32_t presetValue = deps_.rotationPreset != nullptr
     ? *deps_.rotationPreset
     : (secondsPerRotation > 0.0f ? static_cast<uint32_t>(lroundf(outputStepsPerRotation / secondsPerRotation)) : 5u);
-  char json[220];
+  char json[260];
   snprintf(
     json,
     sizeof(json),
-    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s,\"rotationPreset\":%lu,\"secondsPerRotation\":%.2f}",
+    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s,\"rotationPreset\":%lu,\"secondsPerRotation\":%.2f,\"runDurationMinutes\":%lu}",
     static_cast<unsigned long>(*deps_.motorSpeedStepsPerSecond),
     static_cast<unsigned long>(*deps_.motorAccelerationStepsPerSecond2),
     *deps_.gearRatio,
     *deps_.reverseRotation ? "true" : "false",
     static_cast<unsigned long>(presetValue),
-    secondsPerRotation
+    secondsPerRotation,
+    deps_.motorRunDurationMinutes != nullptr ? static_cast<unsigned long>(*deps_.motorRunDurationMinutes) : 20UL
   );
   server_.send(200, "application/json", json);
 }
@@ -655,6 +728,9 @@ void FeederWebApp::onPostSettings() {
 
   const uint32_t requestedAcceleration = static_cast<uint32_t>(server_.arg("acceleration").toInt());
   const float requestedGearRatio = server_.arg("gearRatio").toFloat();
+  const uint32_t requestedRunDuration = server_.hasArg("runDurationMinutes")
+    ? static_cast<uint32_t>(server_.arg("runDurationMinutes").toInt())
+    : 20u;
   Serial.printf("POST settings: accel=%lu gear=%.2f reverse=%s preset=%lu\n",
                 static_cast<unsigned long>(requestedAcceleration),
                 requestedGearRatio,
@@ -669,6 +745,11 @@ void FeederWebApp::onPostSettings() {
 
   *deps_.gearRatio = constrainFloat(requestedGearRatio, kMinGearRatio, kMaxGearRatio);
   *deps_.reverseRotation = server_.arg("reverse") == "1";
+  if (deps_.motorRunDurationMinutes != nullptr) {
+    *deps_.motorRunDurationMinutes = requestedRunDuration == 10 || requestedRunDuration == 15
+      ? requestedRunDuration
+      : 20u;
+  }
 
   const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * (*deps_.gearRatio);
   *deps_.motorSpeedStepsPerSecond = constrain(

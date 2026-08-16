@@ -11,7 +11,9 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, 
 - ESP32-ul creeaza un Access Point WiFi si serveste o aplicatie web la `http://192.168.4.1`.
 - Din aplicatia web se poate porni/opri feederul cu un buton START/STOP.
 - Aplicatia web afiseaza versiunea firmware care ruleaza.
+- Pagina principala afiseaza timpul ramas pana la oprirea automata si o bara de progres.
 - Din aplicatia web se pot modifica acceleratia, ratia reductorului, timpul unei rotatii si directia motorului cand feederul este oprit.
+- Durata maxima de functionare poate fi setata la `10`, `15` sau `20` minute; valoarea implicita este `20` minute.
 - Din aplicatia web se poate incarca un firmware `.bin` nou si flash-ui in slotul OTA liber, cu confirmare inainte de update.
 - Setarile motorului sunt salvate in flash si sunt reincarcate la pornire.
 - Senzorul Hall numara rotatiile reale si permite detectarea unui mecanism blocat.
@@ -71,7 +73,7 @@ Versiunea firmware este definita in `src/main.cpp` prin `FW_VERSION`. Aceeasi va
 
 Scriptul `copy_firmware.py` ruleaza automat dupa build prin `extra_scripts = post:copy_firmware.py` din `platformio.ini`. Scriptul citeste `FW_VERSION`, elimina punctele din versiune si copiaza firmware-ul in folderul `release`.
 
-Exemplu: `FW_VERSION "1.0.3"` produce `release/firmware103.bin`.
+Exemplu: `FW_VERSION "1.0.6"` produce `release/firmware106_c3-supermini.bin` sau `release/firmware106_wroom.bin`, in functie de mediul compilat.
 
 ## WiFi si aplicatia web
 
@@ -162,6 +164,7 @@ La pornire, `loadMotorSettings()` citeste din namespace-ul NVS `feeder` urmatoar
 | `ratio` | `gearRatio` | `1.0` |
 | `reverse` | `reverseRotation` | `false` |
 | `rotationPreset` | `rotationPreset` | `5` secunde/rotatie |
+| `runMinutes` | `motorRunDurationMinutes` | `20` minute |
 
 La salvare, `saveMotorSettings()` scrie aceleasi valori in flash. Valorile sunt limitate intre praguri minime si maxime inainte de aplicare.
 
@@ -175,6 +178,8 @@ Functia `toggleMotor()` inverseaza starea motorului:
 - daca motorul era pornit, cere oprirea cu `stopMove()` si dezactiveaza iesirile driverului.
 
 Driverul este dezactivat si la pornirea placii. Astfel, bobinele motorului nu raman alimentate inutil cand feederul este oprit, ceea ce reduce incalzirea motorului si a driverului.
+
+La fiecare pornire manuala, firmware-ul porneste si un cronometru de sesiune. Durata este selectata din pagina de setari: `10`, `15` sau `20` minute. La expirare, firmware-ul opreste miscarea si dezactiveaza driverul. O secventa automata de recuperare dupa blocaj nu reseteaza cronometrul, astfel incat limita se aplica intregii sesiuni de functionare.
 
 ### Senzor Hall si detectarea blocajului
 
@@ -210,6 +215,7 @@ webApp.loop();
 updateButton();
 updateRotationCounter();
 updateJamRecovery();
+updateMotorRunTimer();
 updateStatusLed();
 ```
 
@@ -222,6 +228,7 @@ Sectiunea de setari din pagina web contine:
 - acceleratia motorului, implicit `1000` pasi/s^2;
 - ratia reductorului, implicit `1`;
 - presetul pentru perioada unei rotatii: `4`, `5`, `6` sau `7` secunde;
+- durata pana la oprirea automata: `10`, `15` sau `20` minute, implicit `20` minute;
 - un switch pentru inversarea directiei de rotatie.
 
 Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint-ul `/settings` refuza si el salvarea cu status `409` daca feederul ruleaza, deci protectia exista si in firmware, nu doar in interfata.
@@ -229,6 +236,8 @@ Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint
 Ratia reductorului si presetul schimba viteza calculata a motorului. Endpoint-ul `/settings` returneaza atat viteza rezultata in pasi/s, cat si perioada calculata in secunde/rotatie.
 
 Pagina principala afiseaza numarul de rotatii, perioada ultimei rotatii si avertizarea de blocaj. Campul `jammedPermanent` diferentiaza recuperarea automata in curs de situatia care necesita verificarea manuala a mecanismului.
+
+Cat timp sesiunea este activa, endpoint-ul `/status` returneaza si `timerActive`, `runDurationSeconds` si `runRemainingSeconds`. Interfata transforma aceste valori intr-o numaratoare inversa `MM:SS` si o bara de progres. Bara este verde la inceput, galbena cand ramane cel mult 50% din timp si rosie cand ramane cel mult 20%. Cand motorul este oprit, timpul este afisat ca `--:--`.
 
 ### Update firmware din web UI
 
@@ -272,7 +281,7 @@ Un motor pas cu pas se poate incalzi in functionare normala, dar temperatura tre
 5. Verifica tensiunea sursei, conexiunile bobinelor si masa comuna. Nu conecta sau deconecta motorul cat timp driverul este alimentat.
 6. Masoara temperatura cu un termometru. Aproximativ `50-60 C` poate fi normal pentru multe motoare pas cu pas; la `70-80 C` este prudent sa reduci curentul si sa verifici fisa tehnica a motorului.
 
-Dezactivarea software implementata ajuta doar cand feederul este oprit. In timpul functionarii continue, masura principala ramane reglarea corecta a curentului TMC2208, urmata de eliminarea frecarilor si racirea driverului.
+Oprirea automata limiteaza durata unei sesiuni continue si dezactiveaza driverul la expirare. Ea nu inlocuieste reglarea corecta a curentului TMC2208, eliminarea frecarilor si racirea driverului.
 
 ## Comenzi utile
 
