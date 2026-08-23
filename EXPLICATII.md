@@ -1,18 +1,18 @@
 # Explicatii proiect ESP32 feeder
 
-Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, folosind un ESP32-WROOM / ESP32 DevKit sau un ESP32-C3 SuperMini. Motorul este comandat in modul STEP/DIR, iar pornirea si oprirea se fac dintr-un singur buton.
+Acest proiect controleaza un motor pas cu pas NEMA 17 in modul STEP/DIR, folosind un ESP32-WROOM / ESP32 DevKit sau un ESP32-C3 SuperMini. Varianta C3 foloseste un TMC2209 configurat si diagnosticat prin UART, iar varianta WROOM pastreaza compatibilitatea STEP/DIR existenta.
 
 ## Pe scurt
 
 - ESP32-ul porneste si configureaza pinii pentru motor, buton si LED.
-- Driverul TMC2208 este tinut dezactivat la pornire.
+- Driverul de motor este tinut dezactivat la pornire.
 - La apasarea butonului, motorul porneste si ruleaza continuu inainte.
 - La urmatoarea apasare, motorul se opreste controlat, apoi driverul este dezactivat.
 - ESP32-ul creeaza un Access Point WiFi si serveste o aplicatie web la `http://192.168.4.1`.
 - Din aplicatia web se poate porni/opri feederul cu un buton START/STOP.
 - Aplicatia web afiseaza versiunea firmware care ruleaza.
 - Pagina principala afiseaza timpul ramas pana la oprirea automata si o bara de progres.
-- Din aplicatia web se pot modifica acceleratia, ratia reductorului, timpul unei rotatii si directia motorului cand feederul este oprit.
+- Din aplicatia web se pot modifica ratia reductorului, directia, timpul unei rotatii, acceleratia si, pe C3, microstepping-ul si curentul TMC2209.
 - Durata maxima de functionare poate fi setata la `10`, `15` sau `20` minute; valoarea implicita este `20` minute.
 - Din aplicatia web se poate incarca un firmware `.bin` nou si flash-ui in slotul OTA liber, cu confirmare inainte de update.
 - Setarile motorului sunt salvate in flash si sunt reincarcate la pornire.
@@ -23,7 +23,7 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 printr-un driver TMC2208, 
 
 ## Fisiere importante
 
-- `platformio.ini` defineste tintele pentru ESP32-WROOM si ESP32-C3 SuperMini, framework-ul Arduino, viteza seriala si biblioteca `FastAccelStepper`.
+- `platformio.ini` defineste tintele pentru ESP32-WROOM si ESP32-C3 SuperMini, framework-ul Arduino, viteza seriala si bibliotecile `FastAccelStepper` si `TMCStepper`.
 - `copy_firmware.py` copiaza firmware-ul compilat in folderul `release`, cu versiunea in nume.
 - `src/main.cpp` contine controlul motorului, citirea butonului si senzorului Hall, precum si recuperarea la blocaj.
 - `src/board_config.h` contine pinii, polaritatile si identitatea OTA specifice fiecarei placi.
@@ -61,19 +61,20 @@ Biblioteca principala este:
 ```ini
 lib_deps =
   gin66/FastAccelStepper@^0.30.0
+  teemuatlut/TMCStepper@^0.7.3
 ```
 
-`FastAccelStepper` genereaza impulsurile STEP mai precis decat o bucla manuala cu `delayMicroseconds`, ceea ce ajuta la miscarea mai stabila a motorului.
+`FastAccelStepper` genereaza impulsurile STEP mai precis decat o bucla manuala cu `delayMicroseconds`, ceea ce ajuta la miscarea mai stabila a motorului. `TMCStepper` configureaza si citeste registrele TMC2209 prin UART pe ESP32-C3.
 
 Bibliotecile `WiFi`, `DNSServer` si `WebServer` vin din framework-ul Arduino pentru ESP32 si sunt folosite pentru Access Point, captive portal si pagina web de control. Biblioteca `Preferences` este folosita pentru salvarea setarilor motorului in flash.
 
 ## Versionarea firmware-ului
 
-Versiunea firmware este definita in `src/main.cpp` prin `FW_VERSION`. Aceeasi valoare este inclusa si intr-un tag binar `FW_VERSION_TAG`, marcat cu `__attribute__((used))`, ca sa ramana in imaginea compilata.
+Versiunea firmware este definita in `src/main.cpp` prin `FW_VERSION`. Compatibilitatea OTA este verificata separat prin markerul de placa definit in `src/board_config.h`.
 
 Scriptul `copy_firmware.py` ruleaza automat dupa build prin `extra_scripts = post:copy_firmware.py` din `platformio.ini`. Scriptul citeste `FW_VERSION`, elimina punctele din versiune si copiaza firmware-ul in folderul `release`.
 
-Exemplu: `FW_VERSION "1.0.6"` produce `release/firmware106_c3-supermini.bin` sau `release/firmware106_wroom.bin`, in functie de mediul compilat.
+Exemplu: `FW_VERSION "1.0.7"` produce `release/firmware107_c3-supermini.bin` sau `release/firmware107_wroom.bin`, in functie de mediul compilat.
 
 ## WiFi si aplicatia web
 
@@ -132,12 +133,14 @@ GPIO6-GPIO11 nu sunt folositi deoarece pe modulele ESP32-WROOM sunt legati de me
 
 | Pin ESP32-C3 | Rol |
 | --- | --- |
-| GPIO7 | STEP catre TMC2208 |
-| GPIO6 | DIR catre TMC2208 |
-| GPIO10 | ENABLE catre TMC2208 |
+| GPIO7 | STEP catre TMC2209 |
+| GPIO6 | DIR catre TMC2209 |
+| GPIO10 | ENABLE catre TMC2209 |
 | GPIO5 | Buton catre GND |
 | GPIO4 | Semnal senzor Hall, activ pe LOW |
 | GPIO8 | LED onboard, activ pe LOW |
+| GPIO0 | RX UART, direct la PDN_UART TMC2209 |
+| GPIO1 | TX UART, la PDN_UART prin rezistenta de 1 kOhm |
 
 ## Cum functioneaza codul
 
@@ -145,30 +148,34 @@ GPIO6-GPIO11 nu sunt folositi deoarece pe modulele ESP32-WROOM sunt legati de me
 
 In `namespace Pins` sunt definite toate conexiunile hardware. Daca placa nu defineste `LED_BUILTIN`, codul foloseste GPIO2 ca fallback, fiind pinul uzual pentru LED-ul onboard pe multe placi ESP32 DevKit.
 
-Valorile implicite sunt acceleratie `1000` pasi/s^2, ratie reductor `1` si preset `5` secunde pentru o rotatie la iesire. Motorul este configurat pentru `200` pasi/rotatie si microstepping `1/8`, adica `1600` impulsuri STEP pentru o rotatie a axului motorului.
+Valorile implicite sunt acceleratie `400` pasi/s^2, ratie reductor `1` si preset `5` secunde pentru o rotatie la iesire. C3 porneste implicit cu microstepping `1/4` si curent RUN `800 mA RMS`; WROOM pastreaza microstepping-ul hardware `1/8`.
 
 Viteza este calculata automat, nu mai este salvata direct:
 
 ```text
-pasi_rotatie_iesire = 200 * 8 * ratie_reductor
+pasi_rotatie_iesire = 200 * microstepping * ratie_reductor
 viteza_pasi_secunda = pasi_rotatie_iesire / secunde_per_rotatie
 ```
 
-De exemplu, pentru ratie `1` si preset `5 s`, viteza este `1600 / 5 = 320 pasi/s`.
+De exemplu, pentru C3 la `1/4`, ratie `1` si preset `5 s`, viteza este `800 / 5 = 160 pasi/s`.
 
 La pornire, `loadMotorSettings()` citeste din namespace-ul NVS `feeder` urmatoarele chei:
 
 | Cheie | Variabila | Valoare implicita |
 | --- | --- | --- |
-| `accel` | `motorAccelerationStepsPerSecond2` | `1000` |
+| `accel` | `motorAccelerationStepsPerSecond2` | `400` |
 | `ratio` | `gearRatio` | `1.0` |
 | `reverse` | `reverseRotation` | `false` |
 | `rotationPreset` | `rotationPreset` | `5` secunde/rotatie |
 | `runMinutes` | `motorRunDurationMinutes` | `20` minute |
+| `microsteps` | `motorMicrosteps` | `4` pe C3 |
+| `runCurrent` | `tmcRunCurrentMilliamps` | `800 mA RMS` pe C3 |
 
 La salvare, `saveMotorSettings()` scrie aceleasi valori in flash. Valorile sunt limitate intre praguri minime si maxime inainte de aplicare.
 
-Debounce-ul butonului este de `35 ms`. Presetul este limitat la `4-7` secunde/rotatie, acceleratia la `100-16000` pasi/s^2, iar ratia reductorului la `1-5`.
+Debounce-ul butonului este de `35 ms`. Presetul este limitat la `4-7` secunde/rotatie, acceleratia foloseste presetarile `200`, `400`, `600` si `800` pasi/s^2, iar ratia reductorului este limitata la `1-5`.
+
+Pe C3, microstepping-ul poate fi `1/4`, `1/8` sau `1/16`, iar curentul RUN poate fi `600`, `800`, `900` sau `1000 mA RMS`. Curentul HOLD este calculat automat la 50% din RUN. Salvarea reaplica imediat microstepping-ul si curentul prin UART, apoi recalculeaza frecventa STEP pentru a pastra perioada mecanica selectata.
 
 ### Pornirea si oprirea motorului
 
@@ -184,6 +191,8 @@ La fiecare pornire manuala, firmware-ul porneste si un cronometru de sesiune. Du
 ### Senzor Hall si detectarea blocajului
 
 Senzorul Hall este configurat cu `INPUT_PULLUP` si este activ pe `LOW`. O trecere a magnetului prin fata senzorului este considerata o rotatie completa a mecanismului. Firmware-ul numara fronturile inactive-active si masoara timpul dintre doua rotatii.
+
+Impulsurile Hall care apar mai repede de 50% din perioada selectata sunt considerate zgomot sau retrigger si sunt ignorate. Ele nu modifica perioada afisata, contorul de rotatii sau referinta folosita pentru detectarea blocajului si sunt raportate pe seriala pentru diagnostic.
 
 Timeout-ul de blocaj este de doua ori perioada selectata, dar niciodata mai mic de `3000 ms`. Pentru presetul de `5 s/rotatie`, lipsa unui impuls Hall timp de peste `10 s` declanseaza recuperarea.
 
@@ -225,11 +234,13 @@ updateStatusLed();
 
 Sectiunea de setari din pagina web contine:
 
-- acceleratia motorului, implicit `1000` pasi/s^2;
 - ratia reductorului, implicit `1`;
+- un switch pentru inversarea directiei de rotatie;
 - presetul pentru perioada unei rotatii: `4`, `5`, `6` sau `7` secunde;
 - durata pana la oprirea automata: `10`, `15` sau `20` minute, implicit `20` minute;
-- un switch pentru inversarea directiei de rotatie.
+- acceleratia: `200`, `400`, `600` sau `800` pasi/s^2, implicit `400`;
+- pe C3, microstepping `1/4`, `1/8` sau `1/16`;
+- pe C3, curent RUN `600`, `800`, `900` sau `1000 mA RMS`.
 
 Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint-ul `/settings` refuza si el salvarea cu status `409` daca feederul ruleaza, deci protectia exista si in firmware, nu doar in interfata.
 
@@ -243,7 +254,7 @@ Cat timp sesiunea este activa, endpoint-ul `/status` returneaza si `timerActive`
 
 Sectiunea **Update firmware** este afisata sub setarile motorului. Utilizatorul alege un fisier `.bin`, apasa `UPDATE FIRMWARE`, apoi confirma intr-un dialog similar cu cel pentru salvarea setarilor.
 
-In firmware, ruta `/update` foloseste biblioteca `Update` din framework-ul ESP32. Inainte de `Update.begin()`, firmware-ul pastreaza inceputul upload-ului in RAM si cauta markerul `TTROBOT_FEEDER_ESP32_FW:`. Daca markerul nu apare in primii 32 KB, upload-ul este respins fara sa fie scris in flash. Dupa validare, upload-ul este scris incremental in slotul OTA liber. Daca update-ul se termina cu succes, raspunsul HTTP este trimis catre browser, apoi ESP32-ul reporneste dupa o mica intarziere.
+In firmware, ruta `/update` foloseste biblioteca `Update` din framework-ul ESP32. Inainte de `Update.begin()`, firmware-ul pastreaza inceputul upload-ului in RAM si cauta markerul placii: `TTROBOT_FEEDER_C3_FW:` pentru C3 sau `TTROBOT_FEEDER_ESP32_FW:` pentru WROOM. Daca markerul nu apare in primii 32 KB, upload-ul este respins fara sa fie scris in flash. Dupa validare, upload-ul este scris incremental in slotul OTA liber. Daca update-ul se termina cu succes, raspunsul HTTP este trimis catre browser, apoi ESP32-ul reporneste dupa o mica intarziere.
 
 Sectiunea este dezactivata in interfata cat timp `motorRunning` este `true`, iar endpoint-ul `/update` refuza update-ul cu status `409` daca feederul ruleaza. Inainte de scrierea firmware-ului, iesirile motorului sunt dezactivate.
 
@@ -265,7 +276,7 @@ Puncte bune:
 Riscuri / lucruri de verificat pe placa reala:
 
 - LED-ul onboard poate fi pe alt pin sau poate lipsi pe unele placi ESP32-WROOM; daca nu urmareste senzorul Hall, trebuie verificat pinul si polaritatea LED-ului placii.
-- Daca driverul TMC2208 are pinul `EN` configurat diferit, `EnableActiveLevel` poate trebui schimbat din `LOW` in `HIGH`.
+- Daca driverul are pinul `EN` configurat diferit, `EnableActiveLevel` poate trebui schimbat din `LOW` in `HIGH`.
 - Viteza si acceleratia sunt conservative, dar trebuie ajustate dupa mecanica, tensiune, curentul driverului si microstepping.
 - Butonul nu are rezistor extern sau condensator de filtrare; debounce-ul software este suficient pentru test, dar la fire lungi poate fi nevoie de filtrare hardware.
 - Senzorul Hall trebuie montat astfel incat sa produca un singur impuls clar la fiecare rotatie; zgomotul sau mai multi magneti vor altera numaratoarea si detectarea blocajului.
@@ -274,14 +285,14 @@ Riscuri / lucruri de verificat pe placa reala:
 
 Un motor pas cu pas se poate incalzi in functionare normala, dar temperatura trebuie sa ramana sub limita din fisa sa tehnica. Pentru diagnostic si reducerea temperaturii:
 
-1. Regleaza limita de curent a TMC2208 din `VREF`, conform curentului nominal al motorului si rezistentei `R_SENSE` de pe modul. Nu folosi curentul maxim al driverului ca tinta.
+1. Pe C3, alege din pagina web curentul RUN potrivit motorului; calculul presupune `R_SENSE = 0.11 Ohm`. Pe un driver configurat analogic, regleaza `VREF` conform modulului si motorului.
 2. Verifica faptul ca pinul ENABLE functioneaza si ca driverul chiar dezactiveaza bobinele cand feederul este oprit.
 3. Verifica blocajele mecanice, alinierea axului, frecarea, sarcina si acceleratia. Un mecanism greu sau blocat mentine motorul solicitat si poate declansa repetat recuperarea.
-4. Monteaza radiator pe TMC2208 si asigura ventilatie in carcasa. Daca driverul intra in protectie termica, motorul poate pierde pasi.
+4. Monteaza radiator pe driver si asigura ventilatie in carcasa. Daca driverul intra in protectie termica, motorul poate pierde pasi.
 5. Verifica tensiunea sursei, conexiunile bobinelor si masa comuna. Nu conecta sau deconecta motorul cat timp driverul este alimentat.
 6. Masoara temperatura cu un termometru. Aproximativ `50-60 C` poate fi normal pentru multe motoare pas cu pas; la `70-80 C` este prudent sa reduci curentul si sa verifici fisa tehnica a motorului.
 
-Oprirea automata limiteaza durata unei sesiuni continue si dezactiveaza driverul la expirare. Ea nu inlocuieste reglarea corecta a curentului TMC2208, eliminarea frecarilor si racirea driverului.
+Oprirea automata limiteaza durata unei sesiuni continue si dezactiveaza driverul la expirare. Ea nu inlocuieste reglarea corecta a curentului, eliminarea frecarilor si racirea driverului.
 
 ## Comenzi utile
 

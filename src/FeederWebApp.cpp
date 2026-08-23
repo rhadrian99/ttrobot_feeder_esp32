@@ -197,6 +197,8 @@ button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-we
 button.back{background:#5a7c99;color:#f4f0e8;font-size:16px;margin-bottom:14px}
 .settings{background:transparent;border:0;border-radius:0;padding:0;margin-bottom:14px}
 .settings h2{font-size:18px;color:#f9c74f;margin-bottom:10px;letter-spacing:0}
+.firmwareSettings{border-top:1px solid #314052;margin-top:24px;padding-top:22px}
+.firmwareSettings h2{color:#f3722c}
 .grid{display:grid;gap:10px}
 label{display:grid;gap:5px;color:#b8c5d1;font-size:12px}
 input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;color:#f4f0e8;padding:11px;font-size:16px}
@@ -216,8 +218,9 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
 .presetBlock{margin-top:14px;border:0;border-radius:8px;background:transparent;padding:0}
 .presetLabel{font-size:12px;color:#b8c5d1;margin-bottom:10px;letter-spacing:.04em;text-transform:uppercase}
 .presetGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.presetButton{width:100%;padding:12px 8px;border:1px solid #314052;border-radius:8px;background:#111b25;color:#f4f0e8;font-size:18px;font-weight:700;cursor:pointer}
-.presetButton.selected{background:#f9c74f;color:#101820;border-color:#f9c74f}
+.microstepGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.presetButton,.accelButton,.microstepButton,.currentButton{width:100%;padding:12px 8px;border:1px solid #314052;border-radius:8px;background:#111b25;color:#f4f0e8;font-size:18px;font-weight:700;cursor:pointer}
+.presetButton.selected,.accelButton.selected,.microstepButton.selected,.currentButton.selected{background:#f9c74f;color:#101820;border-color:#f9c74f}
 .timerGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .timerButton{width:100%;padding:12px 8px;border:1px solid #314052;border-radius:8px;background:#111b25;color:#f4f0e8;font-size:16px;font-weight:700;cursor:pointer}
 .timerButton.selected{background:#f9c74f;color:#101820;border-color:#f9c74f}
@@ -243,11 +246,15 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
     <h2>Setari motor</h2>
     <fieldset id="settingsBox">
       <div class="grid">
-        <label>Acceleratie (pasi/s^2)
-          <input id="accel" type="number" min="100" max="16000" step="1" value="1000">
-        </label>
         <label>Ratie reductor
           <input id="ratio" type="number" min="1" max="5" step="0.05" value="1">
+        </label>
+      </div>
+      <div class="switchRow">
+        <span>Schimba directia de rotatie</span>
+        <label class="switch">
+          <input id="reverse" type="checkbox">
+          <span class="slider"></span>
         </label>
       </div>
       <div class="presetBlock">
@@ -267,18 +274,39 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
           <button type="button" class="timerButton selected" data-minutes="20">20 min</button>
         </div>
       </div>
-      <div class="switchRow">
-        <span>Schimba directia de rotatie</span>
-        <label class="switch">
-          <input id="reverse" type="checkbox">
-          <span class="slider"></span>
-        </label>
+      <div class="presetBlock">
+        <div class="presetLabel">Acceleratie (pasi/s^2)</div>
+        <div class="presetGrid">
+          <button type="button" class="accelButton" data-acceleration="200">200</button>
+          <button type="button" class="accelButton selected" data-acceleration="400">400</button>
+          <button type="button" class="accelButton" data-acceleration="600">600</button>
+          <button type="button" class="accelButton" data-acceleration="800">800</button>
+        </div>
+      </div>
+      <div id="tmcSettings">
+        <div class="presetBlock">
+          <div class="presetLabel">Microstepping</div>
+          <div class="microstepGrid">
+            <button type="button" class="microstepButton selected" data-microsteps="4">1/4</button>
+            <button type="button" class="microstepButton" data-microsteps="8">1/8</button>
+            <button type="button" class="microstepButton" data-microsteps="16">1/16</button>
+          </div>
+        </div>
+        <div class="presetBlock">
+          <div class="presetLabel">Curent RUN (mA RMS)</div>
+          <div class="presetGrid">
+            <button type="button" class="currentButton" data-current="600">600</button>
+            <button type="button" class="currentButton selected" data-current="800">800</button>
+            <button type="button" class="currentButton" data-current="900">900</button>
+            <button type="button" class="currentButton" data-current="1000">1000</button>
+          </div>
+        </div>
       </div>
       <button id="saveSettings" type="button" onclick="askSaveSettings()">SALVEAZA SETARILE</button>
     </fieldset>
     <div id="settingsMsg"></div>
   </section>
-  <section class="settings">
+  <section class="settings firmwareSettings">
     <h2>Update firmware</h2>
     <fieldset id="firmwareBox">
       <label>Fisier firmware (.bin)
@@ -348,10 +376,6 @@ function playSuccess(){
 }
 function getSettingsValidationIssues(){
   const issues=[];
-  const accelValue = Number(document.getElementById('accel').value);
-  if(Number.isNaN(accelValue) || accelValue < 100 || accelValue > 16000){
-    issues.push({field:'accel', label:'Acceleratie', min:100, max:16000});
-  }
   const ratioValue = Number(document.getElementById('ratio').value);
   if(Number.isNaN(ratioValue) || ratioValue < 1 || ratioValue > 5){
     issues.push({field:'ratio', label:'Ratie reductor', min:1, max:5});
@@ -386,10 +410,6 @@ function clampValue(value, min, max){
   const numeric = Number(value);
   if(!Number.isFinite(numeric)) return min;
   return Math.min(Math.max(numeric, min), max);
-}
-function clampAccelValue(value){
-  const clamped = clampValue(value, 100, 16000);
-  return Math.round(clamped);
 }
 function clampRatioValue(value){
   const clamped = clampValue(value, 1, 5);
@@ -439,6 +459,28 @@ function setPresetButtonSelection(value){
     btn.classList.toggle('selected', Number(btn.dataset.preset) === preset);
   });
 }
+function setAccelerationButtonSelection(value){
+  const options = [200, 400, 600, 800];
+  const requested = Number(value || 400);
+  const acceleration = options.reduce((closest, option) =>
+    Math.abs(option - requested) < Math.abs(closest - requested) ? option : closest
+  );
+  document.querySelectorAll('.accelButton').forEach(btn => {
+    btn.classList.toggle('selected', Number(btn.dataset.acceleration) === acceleration);
+  });
+}
+function setMicrostepButtonSelection(value){
+  const microsteps = [4, 8, 16].includes(Number(value)) ? Number(value) : 4;
+  document.querySelectorAll('.microstepButton').forEach(btn => {
+    btn.classList.toggle('selected', Number(btn.dataset.microsteps) === microsteps);
+  });
+}
+function setCurrentButtonSelection(value){
+  const current = [600, 800, 900, 1000].includes(Number(value)) ? Number(value) : 800;
+  document.querySelectorAll('.currentButton').forEach(btn => {
+    btn.classList.toggle('selected', Number(btn.dataset.current) === current);
+  });
+}
 function setTimerButtonSelection(value){
   const minutes = Number(value || 20);
   document.querySelectorAll('.timerButton').forEach(btn => {
@@ -450,9 +492,12 @@ function loadSettings(){
     const preset = Number(s.rotationPreset ?? 5);
     const clampedPreset = Math.max(4, Math.min(7, preset));
 
-    document.getElementById('accel').value=s.acceleration;
     document.getElementById('ratio').value=s.gearRatio;
     document.getElementById('reverse').checked=s.reverse;
+    setAccelerationButtonSelection(s.acceleration);
+    setMicrostepButtonSelection(s.microsteps);
+    setCurrentButtonSelection(s.runCurrent);
+    document.getElementById('tmcSettings').style.display=s.tmcSettingsAvailable?'block':'none';
     setPresetButtonSelection(clampedPreset);
     setTimerButtonSelection(s.runDurationMinutes ?? 20);
     updateFeederStatus();
@@ -482,16 +527,18 @@ function uploadFirmware(){
 }
 function saveSettings(){
   const msg=document.getElementById('settingsMsg');
-  const accelField = document.getElementById('accel');
   const ratioField = document.getElementById('ratio');
+  const selectedAcceleration = document.querySelector('.accelButton.selected')?.dataset.acceleration || 400;
+  const selectedMicrosteps = document.querySelector('.microstepButton.selected')?.dataset.microsteps || 4;
+  const selectedRunCurrent = document.querySelector('.currentButton.selected')?.dataset.current || 800;
   const selectedPreset = document.querySelector('.presetButton.selected')?.dataset.preset || 5;
   const selectedRunDuration = document.querySelector('.timerButton.selected')?.dataset.minutes || 20;
-  const validatedAccel = clampAccelValue(accelField.value);
   const validatedRatio = clampRatioValue(ratioField.value);
-  accelField.value = validatedAccel;
   ratioField.value = validatedRatio;
   const body=new URLSearchParams({
-    acceleration:validatedAccel,
+    acceleration:selectedAcceleration,
+    microsteps:selectedMicrosteps,
+    runCurrent:selectedRunCurrent,
     rotationPreset:selectedPreset,
     runDurationMinutes:selectedRunDuration,
     gearRatio:validatedRatio,
@@ -502,9 +549,11 @@ function saveSettings(){
     .then(s=>{msg.textContent='Setari salvate';playSuccess();
       const preset = Number(s.rotationPreset ?? 5);
       const clampedPreset = Math.max(4, Math.min(7, preset));
-      document.getElementById('accel').value=clampAccelValue(s.acceleration);
       document.getElementById('ratio').value=clampRatioValue(s.gearRatio);
       document.getElementById('reverse').checked=s.reverse;
+      setAccelerationButtonSelection(s.acceleration);
+      setMicrostepButtonSelection(s.microsteps);
+      setCurrentButtonSelection(s.runCurrent);
       setPresetButtonSelection(clampedPreset);
       setTimerButtonSelection(s.runDurationMinutes ?? 20);})
     .catch(e=>{msg.textContent=e.message;});
@@ -525,6 +574,21 @@ document.addEventListener('DOMContentLoaded',()=>{
     btn.addEventListener('click', () => {
       const preset = Number(btn.dataset.preset || 5);
       setPresetButtonSelection(preset);
+    });
+  });
+  document.querySelectorAll('.accelButton').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setAccelerationButtonSelection(btn.dataset.acceleration);
+    });
+  });
+  document.querySelectorAll('.microstepButton').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setMicrostepButtonSelection(btn.dataset.microsteps);
+    });
+  });
+  document.querySelectorAll('.currentButton').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setCurrentButtonSelection(btn.dataset.current);
     });
   });
   document.querySelectorAll('.timerButton').forEach(btn => {
@@ -686,23 +750,28 @@ void FeederWebApp::onStatus() {
 }
 
 void FeederWebApp::sendSettings() {
-  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * (*deps_.gearRatio);
+  const uint32_t microsteps = deps_.motorMicrosteps != nullptr ? *deps_.motorMicrosteps : kMicrostepsPerStep;
+  const uint32_t runCurrent = deps_.tmcRunCurrentMilliamps != nullptr ? *deps_.tmcRunCurrentMilliamps : 800u;
+  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * microsteps) * (*deps_.gearRatio);
   const float secondsPerRotation = *deps_.motorSpeedStepsPerSecond > 0 ? (outputStepsPerRotation / static_cast<float>(*deps_.motorSpeedStepsPerSecond)) : 0.0f;
   const uint32_t presetValue = deps_.rotationPreset != nullptr
     ? *deps_.rotationPreset
     : (secondsPerRotation > 0.0f ? static_cast<uint32_t>(lroundf(outputStepsPerRotation / secondsPerRotation)) : 5u);
-  char json[260];
+  char json[360];
   snprintf(
     json,
     sizeof(json),
-    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s,\"rotationPreset\":%lu,\"secondsPerRotation\":%.2f,\"runDurationMinutes\":%lu}",
+    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s,\"rotationPreset\":%lu,\"secondsPerRotation\":%.2f,\"runDurationMinutes\":%lu,\"microsteps\":%lu,\"runCurrent\":%lu,\"tmcSettingsAvailable\":%s}",
     static_cast<unsigned long>(*deps_.motorSpeedStepsPerSecond),
     static_cast<unsigned long>(*deps_.motorAccelerationStepsPerSecond2),
     *deps_.gearRatio,
     *deps_.reverseRotation ? "true" : "false",
     static_cast<unsigned long>(presetValue),
     secondsPerRotation,
-    deps_.motorRunDurationMinutes != nullptr ? static_cast<unsigned long>(*deps_.motorRunDurationMinutes) : 20UL
+    deps_.motorRunDurationMinutes != nullptr ? static_cast<unsigned long>(*deps_.motorRunDurationMinutes) : 20UL,
+    static_cast<unsigned long>(microsteps),
+    static_cast<unsigned long>(runCurrent),
+    deps_.tmcSettingsAvailable ? "true" : "false"
   );
   server_.send(200, "application/json", json);
 }
@@ -717,7 +786,8 @@ void FeederWebApp::onPostSettings() {
     return;
   }
 
-  if (!server_.hasArg("acceleration") || !server_.hasArg("gearRatio") || !server_.hasArg("reverse")) {
+  if (!server_.hasArg("acceleration") || !server_.hasArg("gearRatio") || !server_.hasArg("reverse") ||
+      (deps_.tmcSettingsAvailable && (!server_.hasArg("microsteps") || !server_.hasArg("runCurrent")))) {
     server_.send(400, "text/plain", "Lipsesc setari");
     return;
   }
@@ -727,31 +797,43 @@ void FeederWebApp::onPostSettings() {
     : 5u;
 
   const uint32_t requestedAcceleration = static_cast<uint32_t>(server_.arg("acceleration").toInt());
+  const uint32_t acceleration = requestedAcceleration == 200 || requestedAcceleration == 600 || requestedAcceleration == 800
+    ? requestedAcceleration
+    : 400u;
   const float requestedGearRatio = server_.arg("gearRatio").toFloat();
   const uint32_t requestedRunDuration = server_.hasArg("runDurationMinutes")
     ? static_cast<uint32_t>(server_.arg("runDurationMinutes").toInt())
     : 20u;
-  Serial.printf("POST settings: accel=%lu gear=%.2f reverse=%s preset=%lu\n",
+  const uint32_t requestedMicrosteps = static_cast<uint32_t>(server_.arg("microsteps").toInt());
+  const uint32_t requestedRunCurrent = static_cast<uint32_t>(server_.arg("runCurrent").toInt());
+  const uint32_t microsteps = requestedMicrosteps == 8 || requestedMicrosteps == 16 ? requestedMicrosteps : 4u;
+  const uint32_t runCurrent = requestedRunCurrent == 600 || requestedRunCurrent == 900 || requestedRunCurrent == 1000
+    ? requestedRunCurrent
+    : 800u;
+  Serial.printf("POST settings: accel=%lu gear=%.2f reverse=%s preset=%lu microsteps=%lu runCurrent=%lu\n",
                 static_cast<unsigned long>(requestedAcceleration),
                 requestedGearRatio,
                 server_.arg("reverse") == "1" ? "true" : "false",
-                static_cast<unsigned long>(requestedPreset));
+                static_cast<unsigned long>(requestedPreset),
+                static_cast<unsigned long>(microsteps),
+                static_cast<unsigned long>(runCurrent));
 
-  *deps_.motorAccelerationStepsPerSecond2 = constrain(
-    requestedAcceleration,
-    kMinMotorAccelerationStepsPerSecond2,
-    kMaxMotorAccelerationStepsPerSecond2
-  );
+  *deps_.motorAccelerationStepsPerSecond2 = acceleration;
 
   *deps_.gearRatio = constrainFloat(requestedGearRatio, kMinGearRatio, kMaxGearRatio);
   *deps_.reverseRotation = server_.arg("reverse") == "1";
+  if (deps_.tmcSettingsAvailable) {
+    *deps_.motorMicrosteps = microsteps;
+    *deps_.tmcRunCurrentMilliamps = runCurrent;
+  }
   if (deps_.motorRunDurationMinutes != nullptr) {
     *deps_.motorRunDurationMinutes = requestedRunDuration == 10 || requestedRunDuration == 15
       ? requestedRunDuration
       : 20u;
   }
 
-  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * (*deps_.gearRatio);
+  const uint32_t activeMicrosteps = deps_.motorMicrosteps != nullptr ? *deps_.motorMicrosteps : kMicrostepsPerStep;
+  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * activeMicrosteps) * (*deps_.gearRatio);
   *deps_.motorSpeedStepsPerSecond = constrain(
     static_cast<uint32_t>(lroundf(outputStepsPerRotation / static_cast<float>(requestedPreset))),
     kMinMotorSpeedStepsPerSecond,

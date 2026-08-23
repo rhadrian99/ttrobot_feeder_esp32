@@ -1,15 +1,18 @@
 #include <Arduino.h>
 #include <FastAccelStepper.h>
 #include <Preferences.h>
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+#include <TMCStepper.h>
+#endif
 
 #include "FeederWebApp.h"
 #include "board_config.h"
 
-#define FW_VERSION "1.0.6"
+#define FW_VERSION "1.0.7"
 
 constexpr bool EnableActiveLevel = LOW;
 constexpr uint32_t DefaultMotorSpeedStepsPerSecond = 400;
-constexpr uint32_t DefaultMotorAccelerationStepsPerSecond2 = 1000;
+constexpr uint32_t DefaultMotorAccelerationStepsPerSecond2 = 400;
 constexpr float DefaultGearRatio = 1.0f;
 constexpr uint32_t DebounceMillis = 35;
 constexpr uint32_t MinMotorSpeedStepsPerSecond = 1;
@@ -23,10 +26,20 @@ constexpr float MinGearRatio = 1.0f;
 constexpr float MaxGearRatio = 5.0f;
 constexpr uint32_t StallTimeoutMultiplier = 2;
 constexpr uint32_t MinStallTimeoutMs = 3000;
+constexpr uint32_t MinValidRotationPercent = 50;
 constexpr float JamRecoveryDegrees = 15.0f;
 constexpr uint8_t JamRecoveryCycles = 3;
 constexpr uint8_t MaxJamAttempts = 2;
 constexpr uint32_t DefaultMotorRunDurationMinutes = 20;
+
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+constexpr uint32_t TmcUartBaudRate = 115200;
+constexpr uint8_t TmcUartAddress = 0;
+constexpr float TmcRsenseOhms = 0.11f;
+constexpr float TmcHoldCurrentMultiplier = 0.5f;
+#endif
+
+constexpr uint32_t DefaultTmcRunCurrentMilliamps = 800;
 
 enum class JamRecoveryState : uint8_t { Idle, MoveForward, MoveBackward, Finishing };
 
@@ -34,8 +47,15 @@ FastAccelStepperEngine engine;
 FastAccelStepper *stepper = nullptr;
 Preferences preferences;
 
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+HardwareSerial tmcSerial(1);
+TMC2209Stepper tmcDriver(&tmcSerial, TmcRsenseOhms, TmcUartAddress);
+#endif
+
 uint32_t motorSpeedStepsPerSecond = DefaultMotorSpeedStepsPerSecond;
 uint32_t motorAccelerationStepsPerSecond2 = DefaultMotorAccelerationStepsPerSecond2;
+uint32_t motorMicrosteps = kMicrostepsPerStep;
+uint32_t tmcRunCurrentMilliamps = DefaultTmcRunCurrentMilliamps;
 uint32_t rotationPreset = DefaultRotationPreset;
 float gearRatio = DefaultGearRatio;
 bool reverseRotation = false;
@@ -58,15 +78,19 @@ bool lastHallState = false;
 uint32_t rotationsCounter = 0;
 uint32_t lastHallTransitionMillis = 0;
 uint32_t lastRotationTimeMs = 0;
+bool tmcDiagnosticPending = false;
+uint32_t tmcDiagnosticAtMillis = 0;
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
 void applyMotorSettings();
+void updateMotorSpeedFromPreset();
 void loadMotorSettings();
 void saveMotorSettings();
 void writeStatusLed(bool on);
 void updateRotationCounter();
 void updateMotorRunTimer();
+void configureTmcDriver();
 
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
@@ -78,11 +102,16 @@ FeederWebApp::Dependencies buildWebDependencies() {
   dependencies.rotationPreset = &rotationPreset;
   dependencies.motorSpeedStepsPerSecond = &motorSpeedStepsPerSecond;
   dependencies.motorAccelerationStepsPerSecond2 = &motorAccelerationStepsPerSecond2;
+  dependencies.motorMicrosteps = &motorMicrosteps;
+  dependencies.tmcRunCurrentMilliamps = &tmcRunCurrentMilliamps;
   dependencies.gearRatio = &gearRatio;
   dependencies.reverseRotation = &reverseRotation;
   dependencies.motorRunDurationMinutes = &motorRunDurationMinutes;
   dependencies.motorSessionStartMillis = &motorSessionStartMillis;
   dependencies.motorSessionActive = &motorSessionActive;
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  dependencies.tmcSettingsAvailable = true;
+#endif
   dependencies.firmwareVersion = FW_VERSION;
   dependencies.saveMotorSettings = &saveMotorSettings;
   dependencies.applyMotorSettings = &applyMotorSettings;
@@ -94,6 +123,9 @@ FeederWebApp::Dependencies buildWebDependencies() {
 FeederWebApp webApp(buildWebDependencies());
 
 void applyMotorSettings() {
+  updateMotorSpeedFromPreset();
+  configureTmcDriver();
+
   if (stepper == nullptr) {
     return;
   }
@@ -103,7 +135,7 @@ void applyMotorSettings() {
 }
 
 void updateMotorSpeedFromPreset() {
-  const float stepsPerOutputRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * gearRatio;
+  const float stepsPerOutputRotation = static_cast<float>(kMotorStepsPerRevolution * motorMicrosteps) * gearRatio;
   const float computedSpeed = stepsPerOutputRotation / static_cast<float>(rotationPreset);
   motorSpeedStepsPerSecond = static_cast<uint32_t>(lroundf(computedSpeed));
   motorSpeedStepsPerSecond = constrain(motorSpeedStepsPerSecond, MinMotorSpeedStepsPerSecond, MaxMotorSpeedStepsPerSecond);
@@ -119,6 +151,10 @@ void loadMotorSettings() {
     reverseRotation = preferences.getBool("reverse", false);
     rotationPreset = preferences.getUInt("rotationPreset", DefaultRotationPreset);
     motorRunDurationMinutes = preferences.getUInt("runMinutes", DefaultMotorRunDurationMinutes);
+  #if defined(CONFIG_IDF_TARGET_ESP32C3)
+    motorMicrosteps = preferences.getUInt("microsteps", kMicrostepsPerStep);
+    tmcRunCurrentMilliamps = preferences.getUInt("runCurrent", DefaultTmcRunCurrentMilliamps);
+  #endif
     preferences.end();
 
     rotationPreset = constrain(rotationPreset, MinRotationPreset, MaxRotationPreset);
@@ -127,6 +163,15 @@ void loadMotorSettings() {
     if (motorRunDurationMinutes != 10 && motorRunDurationMinutes != 15 && motorRunDurationMinutes != 20) {
       motorRunDurationMinutes = DefaultMotorRunDurationMinutes;
     }
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+    if (motorMicrosteps != 4 && motorMicrosteps != 8 && motorMicrosteps != 16) {
+      motorMicrosteps = kMicrostepsPerStep;
+    }
+    if (tmcRunCurrentMilliamps != 600 && tmcRunCurrentMilliamps != 800 &&
+        tmcRunCurrentMilliamps != 900 && tmcRunCurrentMilliamps != 1000) {
+      tmcRunCurrentMilliamps = DefaultTmcRunCurrentMilliamps;
+    }
+#endif
   } else {
     Serial.println("NVS: niciun setare salvata, folosesc valorile implicite");
     motorAccelerationStepsPerSecond2 = DefaultMotorAccelerationStepsPerSecond2;
@@ -134,16 +179,20 @@ void loadMotorSettings() {
     reverseRotation = false;
     rotationPreset = DefaultRotationPreset;
     motorRunDurationMinutes = DefaultMotorRunDurationMinutes;
+    motorMicrosteps = kMicrostepsPerStep;
+    tmcRunCurrentMilliamps = DefaultTmcRunCurrentMilliamps;
   }
 
   updateMotorSpeedFromPreset();
 
-  Serial.printf("NVS load: speed=%lu accel=%lu ratio=%.2f preset=%lu reverse=%s\n",
+  Serial.printf("NVS load: speed=%lu accel=%lu ratio=%.2f preset=%lu reverse=%s microsteps=%lu runCurrent=%lu\n",
                 static_cast<unsigned long>(motorSpeedStepsPerSecond),
                 static_cast<unsigned long>(motorAccelerationStepsPerSecond2),
                 gearRatio,
                 static_cast<unsigned long>(rotationPreset),
-                reverseRotation ? "true" : "false");
+                reverseRotation ? "true" : "false",
+                static_cast<unsigned long>(motorMicrosteps),
+                static_cast<unsigned long>(tmcRunCurrentMilliamps));
 }
 
 void saveMotorSettings() {
@@ -161,13 +210,17 @@ void saveMotorSettings() {
   preferences.putBool("reverse", reverseRotation);
   preferences.putUInt("rotationPreset", rotationPreset);
   preferences.putUInt("runMinutes", motorRunDurationMinutes);
+  preferences.putUInt("microsteps", motorMicrosteps);
+  preferences.putUInt("runCurrent", tmcRunCurrentMilliamps);
   preferences.end();
-  Serial.printf("NVS save: speed=%lu accel=%lu ratio=%.2f preset=%lu reverse=%s\n",
+  Serial.printf("NVS save: speed=%lu accel=%lu ratio=%.2f preset=%lu reverse=%s microsteps=%lu runCurrent=%lu\n",
                 static_cast<unsigned long>(motorSpeedStepsPerSecond),
                 static_cast<unsigned long>(motorAccelerationStepsPerSecond2),
                 gearRatio,
                 static_cast<unsigned long>(rotationPreset),
-                reverseRotation ? "true" : "false");
+                reverseRotation ? "true" : "false",
+                static_cast<unsigned long>(motorMicrosteps),
+                static_cast<unsigned long>(tmcRunCurrentMilliamps));
 }
 
 void setMotorEnabled(bool enabled) {
@@ -223,7 +276,7 @@ void startMotor(bool resetJamAttempts = true) {
 }
 
 int32_t computeWiggleSteps() {
-  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * kMicrostepsPerStep) * gearRatio;
+  const float outputStepsPerRotation = static_cast<float>(kMotorStepsPerRevolution * motorMicrosteps) * gearRatio;
   return static_cast<int32_t>(lroundf(outputStepsPerRotation * (JamRecoveryDegrees / 360.0f)));
 }
 
@@ -271,6 +324,108 @@ void updateJamRecovery() {
   }
 }
 
+void configureTmcDriver() {
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  const uint8_t version = static_cast<uint8_t>(tmcDriver.IOIN() >> 24);
+  if (version != 0x21) {
+    Serial.println("TMC2209 nu raspunde; setarea curentului nu a fost aplicata.");
+    return;
+  }
+
+  tmcDriver.begin();
+  tmcDriver.I_scale_analog(false);
+  tmcDriver.rms_current(tmcRunCurrentMilliamps, TmcHoldCurrentMultiplier);
+  tmcDriver.microsteps(motorMicrosteps);
+  tmcDriver.intpol(true);
+  tmcDriver.en_spreadCycle(false);
+  tmcDriver.pwm_autoscale(true);
+
+  Serial.printf("TMC2209 configurat: RUN=%u mA RMS HOLD=%u mA RMS R_SENSE=%.2f ohm\n",
+                static_cast<unsigned int>(tmcRunCurrentMilliamps),
+                static_cast<unsigned int>(tmcRunCurrentMilliamps * TmcHoldCurrentMultiplier),
+                TmcRsenseOhms);
+#endif
+}
+
+void printTmcSettings() {
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  const uint32_t ioin = tmcDriver.IOIN();
+  const uint8_t version = static_cast<uint8_t>(ioin >> 24);
+
+  Serial.println("--- TMC2209 UART ---");
+  Serial.printf("address=%u IOIN=0x%08lX version=0x%02X\n",
+                TmcUartAddress,
+                static_cast<unsigned long>(ioin),
+                version);
+  if (version != 0x21) {
+    Serial.println("TMC2209 fara raspuns valid; verifica PDN_UART, GND si adresa MS1/MS2.");
+    Serial.println("--------------------");
+    return;
+  }
+
+  const uint32_t gconf = tmcDriver.GCONF();
+  const uint32_t chopconf = tmcDriver.CHOPCONF();
+  const uint32_t iholdIrun = tmcDriver.IHOLD_IRUN();
+  const uint32_t pwmconf = tmcDriver.PWMCONF();
+  const uint32_t drvStatus = tmcDriver.DRV_STATUS();
+  const uint8_t mres = static_cast<uint8_t>((chopconf >> 24) & 0x0F);
+  const uint16_t microsteps = mres <= 8 ? static_cast<uint16_t>(256U >> mres) : 0;
+  const uint8_t holdCurrentScale = static_cast<uint8_t>(iholdIrun & 0x1F);
+  const uint8_t runCurrentScale = static_cast<uint8_t>((iholdIrun >> 8) & 0x1F);
+  const uint16_t holdCurrentMilliamps = tmcDriver.cs2rms(holdCurrentScale);
+  const uint16_t runCurrentMilliamps = tmcDriver.cs2rms(runCurrentScale);
+
+  Serial.printf("GCONF=0x%08lX spreadCycle=%s pdnDisable=%s mstepRegSelect=%s\n",
+                static_cast<unsigned long>(gconf),
+                (gconf & (1UL << 2)) ? "ON" : "OFF",
+                (gconf & (1UL << 6)) ? "ON" : "OFF",
+                (gconf & (1UL << 7)) ? "ON" : "OFF");
+  Serial.printf("CHOPCONF=0x%08lX microsteps=%u interpolate=%s\n",
+                static_cast<unsigned long>(chopconf),
+                microsteps,
+                (chopconf & (1UL << 28)) ? "ON" : "OFF");
+  Serial.printf("IHOLD_IRUN=0x%08lX IHOLD=%lu IRUN=%lu IHOLDDELAY=%lu\n",
+                static_cast<unsigned long>(iholdIrun),
+                static_cast<unsigned long>(iholdIrun & 0x1F),
+                static_cast<unsigned long>((iholdIrun >> 8) & 0x1F),
+                static_cast<unsigned long>((iholdIrun >> 16) & 0x0F));
+  Serial.printf("PWMCONF=0x%08lX\n", static_cast<unsigned long>(pwmconf));
+  Serial.printf("DRV_STATUS=0x%08lX ot=%s otpw=%s stallGuard=%s standstill=%s\n",
+                static_cast<unsigned long>(drvStatus),
+                (drvStatus & (1UL << 25)) ? "YES" : "NO",
+                (drvStatus & (1UL << 26)) ? "YES" : "NO",
+                (drvStatus & (1UL << 24)) ? "YES" : "NO",
+                (drvStatus & (1UL << 31)) ? "YES" : "NO");
+  Serial.printf("Faze: openA=%s openB=%s shortA=%s shortB=%s CS_ACTUAL=%lu\n",
+                (drvStatus & (1UL << 29)) ? "YES" : "NO",
+                (drvStatus & (1UL << 30)) ? "YES" : "NO",
+                (drvStatus & (1UL << 27)) ? "YES" : "NO",
+                (drvStatus & (1UL << 28)) ? "YES" : "NO",
+                static_cast<unsigned long>((drvStatus >> 16) & 0x1F));
+  Serial.printf("IFCNT=%u\n", tmcDriver.IFCNT());
+  Serial.println("Rezumat configuratie:");
+  Serial.printf("  RUN: aproximativ %u mA RMS\n", runCurrentMilliamps);
+  Serial.printf("  HOLD: aproximativ %u mA RMS\n", holdCurrentMilliamps);
+  if (microsteps != 0) {
+    Serial.printf("  Microstepping: 1/%u\n", microsteps);
+  } else {
+    Serial.println("  Microstepping: valoare necunoscuta");
+  }
+  Serial.printf("  Interpolare: %s\n", (chopconf & (1UL << 28)) ? "activa" : "inactiva");
+  Serial.printf("  Mod functionare: %s\n", (gconf & (1UL << 2)) ? "SpreadCycle" : "StealthChop");
+  Serial.println("--------------------");
+#else
+  Serial.println("TMC2209 UART este configurat doar pentru ESP32-C3.");
+#endif
+}
+
+void updateTmcDiagnostic() {
+  if (tmcDiagnosticPending && static_cast<int32_t>(millis() - tmcDiagnosticAtMillis) >= 0) {
+    tmcDiagnosticPending = false;
+    printTmcSettings();
+  }
+}
+
 void toggleMotor() {
   if (stepper == nullptr) {
     Serial.println("Eroare: motorul nu a fost initializat");
@@ -285,11 +440,14 @@ void toggleMotor() {
   }
 
   if (motorRunning) {
+    tmcDiagnosticPending = false;
     stopMotor(false);
     motorSessionActive = false;
     Serial.println("Motor oprit");
   } else {
     startMotor();
+    tmcDiagnosticAtMillis = millis() + 500;
+    tmcDiagnosticPending = true;
     Serial.println("Motor pornit");
   }
 }
@@ -322,13 +480,23 @@ void updateRotationCounter() {
   const bool currentHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
   if (currentHallState && !lastHallState) {
     const uint32_t now = millis();
-    if (lastHallTransitionMillis != 0) {
-      lastRotationTimeMs = now - lastHallTransitionMillis;
+    const uint32_t referenceMillis = lastHallTransitionMillis != 0 ? lastHallTransitionMillis : motorStartMillis;
+    const uint32_t elapsedMillis = now - referenceMillis;
+    const uint32_t minimumRotationMillis = rotationPreset * 1000UL * MinValidRotationPercent / 100UL;
+
+    if (elapsedMillis >= minimumRotationMillis) {
+      if (lastHallTransitionMillis != 0) {
+        lastRotationTimeMs = elapsedMillis;
+      }
+      lastHallTransitionMillis = now;
+      rotationsCounter++;
+      // Rotatie reala confirmata dupa recuperare => mecanismul functioneaza, resetam contorul de blocari.
+      jamAttemptCount = 0;
+    } else {
+      Serial.printf("Impuls Hall ignorat: %lu ms (minim %lu ms)\n",
+                    static_cast<unsigned long>(elapsedMillis),
+                    static_cast<unsigned long>(minimumRotationMillis));
     }
-    lastHallTransitionMillis = now;
-    rotationsCounter++;
-    // Rotatie reala confirmata dupa recuperare => mecanismul functioneaza, resetam contorul de blocari.
-    jamAttemptCount = 0;
   }
   lastHallState = currentHallState;
 
@@ -375,6 +543,15 @@ void setup() {
   Serial.begin(115200);
   loadMotorSettings();
 
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  tmcSerial.begin(TmcUartBaudRate, SERIAL_8N1, Pins::TmcUartRx, Pins::TmcUartTx);
+  Serial.printf("TMC2209 UART: RX=GPIO%u TX=GPIO%u baud=%lu address=%u\n",
+                Pins::TmcUartRx,
+                Pins::TmcUartTx,
+                static_cast<unsigned long>(TmcUartBaudRate),
+                TmcUartAddress);
+#endif
+
   pinMode(Pins::Step, OUTPUT);
   pinMode(Pins::Dir, OUTPUT);
   pinMode(Pins::Enable, OUTPUT);
@@ -417,4 +594,5 @@ void loop() {
   updateJamRecovery();
   updateMotorRunTimer();
   updateStatusLed();
+  updateTmcDiagnostic();
 }

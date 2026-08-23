@@ -17,11 +17,14 @@ class FeederWebApp {
     uint32_t *rotationPreset = nullptr;
     uint32_t *motorSpeedStepsPerSecond = nullptr;
     uint32_t *motorAccelerationStepsPerSecond2 = nullptr;
+    uint32_t *motorMicrosteps = nullptr;
+    uint32_t *tmcRunCurrentMilliamps = nullptr;
     float *gearRatio = nullptr;
     bool *reverseRotation = nullptr;
     uint32_t *motorRunDurationMinutes = nullptr;
     uint32_t *motorSessionStartMillis = nullptr;
     bool *motorSessionActive = nullptr;
+    bool tmcSettingsAvailable = false;
     const char *firmwareVersion = nullptr;
     void (*saveMotorSettings)() = nullptr;
     void (*applyMotorSettings)() = nullptr;

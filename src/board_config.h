@@ -14,6 +14,8 @@ constexpr uint8_t Enable = 10;
 constexpr uint8_t Button = 5;
 constexpr uint8_t StatusLed = 8;
 constexpr uint8_t HallSensor = 4;
+constexpr uint8_t TmcUartRx = 0;
+constexpr uint8_t TmcUartTx = 1;
 }  // namespace Pins
 
 // LED onboard pe C3 supermini este activ pe LOW.
@@ -23,6 +25,7 @@ constexpr const char *BoardName = "ESP32-C3 supermini";
 
 // Marker de identitate firmware pentru validarea OTA (per placa).
 constexpr const char *FirmwareIdentityPrefix = "TTROBOT_FEEDER_C3_FW:";
+constexpr uint32_t kMicrostepsPerStep = 4;
 
 #else
 
@@ -47,12 +50,12 @@ constexpr const char *BoardName = "ESP32-WROOM";
 // Marker de identitate firmware pentru validarea OTA (per placa).
 // Pastrat neschimbat pentru compatibilitate OTA cu firmware-ul existent.
 constexpr const char *FirmwareIdentityPrefix = "TTROBOT_FEEDER_ESP32_FW:";
+constexpr uint32_t kMicrostepsPerStep = 8;
 
 #endif
 
 // Constante motor/driver comune ambelor placi.
 constexpr uint32_t kMotorStepsPerRevolution = 200;
-constexpr uint32_t kMicrostepsPerStep = 8;
 
 inline float constrainFloat(float value, float minimum, float maximum) {
   if (value < minimum) return minimum;

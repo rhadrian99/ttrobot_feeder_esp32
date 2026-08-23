@@ -75,7 +75,7 @@ Instaleaza extensia VS Code **PlatformIO IDE** sau PlatformIO CLI. Dupa instalar
 Versiunea firmware este definita in [src/main.cpp](src/main.cpp):
 
 ```cpp
-#define FW_VERSION "1.0.6"
+#define FW_VERSION "1.0.7"
 ```
 
 La fiecare build, scriptul [copy_firmware.py](copy_firmware.py) copiaza automat binarul compilat in folderul `release`, cu versiunea si placa in nume. Versiunea `1.0.6` genereaza:
