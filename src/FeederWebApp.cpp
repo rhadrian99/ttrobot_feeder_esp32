@@ -51,14 +51,14 @@ button:disabled{opacity:.48;cursor:not-allowed}
 <body>
 <main class="panel">
   <h1 id="appTitle">ESP32 Feeder</h1>
-  <div class="sub">Access Point local: <span style="color:white;">192.168.4.1</span></div>
+  <div class="sub"><span data-i18n="localAp">Access Point local</span>: <span style="color:white;">192.168.4.1</span></div>
   <section class="status">
-    <div class="label">Stare feeder</div>
+    <div class="label" data-i18n="feederState">Stare feeder</div>
     <div id="state" class="off">OPRIT</div>
   </section>
   <section class="runTimer">
     <div class="timerRow">
-      <span>Timp pana la oprire</span>
+      <span data-i18n="timeRemaining">Timp pana la oprire</span>
       <strong id="timerText">--:--</strong>
     </div>
     <div id="timerTrack" class="progressTrack" role="progressbar" aria-label="Timp ramas" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -71,16 +71,27 @@ button:disabled{opacity:.48;cursor:not-allowed}
     <span id="jamAlertText">Motor blocat! Verifica mecanismul si porneste din nou.</span>
   </div>
   <div class="meta">
-    <div>Clienti WiFi<br><strong id="clients">0</strong></div>
+    <div><span data-i18n="wifiClients">Clienti WiFi</span><br><strong id="clients">0</strong></div>
     <div>IP<br><strong id="ip">192.168.4.1</strong></div>
-    <div>Rotatii<br><strong id="rotations">0</strong></div>
-    <div>Perioada<br><strong id="rotPeriod">0 ms</strong></div>
+    <div><span data-i18n="rotations">Rotatii</span><br><strong id="rotations">0</strong></div>
+    <div><span data-i18n="period">Perioada</span><br><strong id="rotPeriod">0 ms</strong></div>
   </div>
   <section class="actions">
-    <button class="secondary" onclick="window.location.href='/settings-page'">SETARI</button>
+    <button class="secondary" data-i18n="settings" onclick="window.location.href='/settings-page'">SETARI</button>
   </section>
 </main>
 <script>
+const translations={
+  ro:{localAp:'Access Point local',feederState:'Stare feeder',timeRemaining:'Timp pana la oprire',wifiClients:'Clienti WiFi',rotations:'Rotatii',period:'Perioada',settings:'SETARI',running:'PORNIT',stopped:'OPRIT',start:'START',stop:'STOP',jamPermanent:'Motor blocat definitiv dupa 2 incercari! Verifica mecanismul si porneste manual.',jamRecovery:'Motor blocat, se incearca deblocarea automata...'},
+  en:{localAp:'Local Access Point',feederState:'Feeder status',timeRemaining:'Time until stop',wifiClients:'WiFi clients',rotations:'Rotations',period:'Period',settings:'SETTINGS',running:'RUNNING',stopped:'STOPPED',start:'START',stop:'STOP',jamPermanent:'Motor permanently jammed after 2 attempts! Check the mechanism and start it manually.',jamRecovery:'Motor jammed, attempting automatic recovery...'}
+};
+function getLanguage(){try{return localStorage.getItem('feederLanguage')==='en'?'en':'ro';}catch(e){return 'ro';}}
+let currentLanguage=getLanguage();
+function tr(key){return translations[currentLanguage][key]||key;}
+function applyLanguage(){
+  document.documentElement.lang=currentLanguage;
+  document.querySelectorAll('[data-i18n]').forEach(element=>{element.textContent=tr(element.dataset.i18n);});
+}
 const AudioContext=window.AudioContext||window.webkitAudioContext;
 let audioCtx=null;
 function initAudio(){if(!audioCtx){audioCtx=new AudioContext();}}
@@ -143,9 +154,9 @@ function poll(){
     const state=document.getElementById('state');
     const btn=document.getElementById('toggleBtn');
     const settingsBtn=document.querySelector('.actions button');
-    state.textContent=d.running?'PORNIT':'OPRIT';
+    state.textContent=d.running?tr('running'):tr('stopped');
     state.className=d.running?'':'off';
-    btn.textContent=d.running?'STOP':'START';
+    btn.textContent=d.running?tr('stop'):tr('start');
     btn.className=d.running?'off':'';
     settingsBtn.disabled=d.running;
     document.getElementById('clients').textContent=d.clients;
@@ -164,8 +175,8 @@ function poll(){
     document.getElementById('appTitle').textContent='ESP32 Feeder v.'+d.version;
     document.getElementById('jamAlert').className=d.jammed?'alert show':'alert';
     document.getElementById('jamAlertText').textContent=d.jammedPermanent
-      ? 'Motor blocat definitiv dupa 2 incercari! Verifica mecanismul si porneste manual.'
-      : 'Motor blocat, se incearca deblocarea automata...';
+      ? tr('jamPermanent')
+      : tr('jamRecovery');
   }).catch(()=>{});
 }
 document.addEventListener('DOMContentLoaded',()=>{
@@ -174,6 +185,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     settingsBtn.addEventListener('click',playClick);
   }
 });
+applyLanguage();
 setInterval(poll,1000);poll();
 </script>
 </body>
@@ -195,6 +207,10 @@ h1{font-size:26px;text-align:center;margin-bottom:8px;color:#f9c74f;letter-spaci
 .sub{text-align:center;color:#ffffff;font-size:15px;margin-bottom:18px}
 button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-weight:700;color:#101820;background:#90be6d;cursor:pointer;touch-action:manipulation}
 button.back{background:#5a7c99;color:#f4f0e8;font-size:16px;margin-bottom:14px}
+.languageBlock{margin-bottom:18px}
+.languageGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.languageButton{padding:10px 8px;border:1px solid #314052;background:#111b25;color:#f4f0e8;font-size:14px}
+.languageButton.selected{background:#5a7c99;border-color:#7da1bf;color:#fff}
 .settings{background:transparent;border:0;border-radius:0;padding:0;margin-bottom:14px}
 .settings h2{font-size:18px;color:#f9c74f;margin-bottom:10px;letter-spacing:0}
 .firmwareSettings{border-top:1px solid #314052;margin-top:24px;padding-top:22px}
@@ -202,7 +218,10 @@ button.back{background:#5a7c99;color:#f4f0e8;font-size:16px;margin-bottom:14px}
 .grid{display:grid;gap:10px}
 label{display:grid;gap:5px;color:#b8c5d1;font-size:12px}
 input{width:100%;border:1px solid #314052;border-radius:8px;background:#0f1720;color:#f4f0e8;padding:11px;font-size:16px}
-input[type=file]{font-size:13px;color:#b8c5d1}
+input[type=file]{display:none}
+.filePicker{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px;border:1px solid #314052;border-radius:8px;background:#0f1720;padding:10px}
+.fileButton{display:inline-block;border-radius:6px;background:#5a7c99;color:#fff;padding:8px 10px;font-size:13px;font-weight:700;cursor:pointer}
+.fileName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#b8c5d1;font-size:12px}
 .switchRow{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#b8c5d1;font-size:12px;margin-top:10px}
 .switch{position:relative;display:inline-block;width:54px;height:30px;flex:0 0 auto}
 .switch input{opacity:0;width:0;height:0}
@@ -240,25 +259,32 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
 </head>
 <body>
 <main class="panel">
-  <h1>ESP32 Feeder - Setari</h1>
-  <button class="back" onclick="window.location.href='/'">← INAPOI</button>
+  <h1 data-i18n="settingsTitle">ESP32 Feeder - Setari</h1>
+  <button class="back" onclick="window.location.href='/'">← <span data-i18n="back">INAPOI</span></button>
+  <div class="languageBlock">
+    <div class="presetLabel" data-i18n="interfaceLanguage">Limba interfata</div>
+    <div class="languageGrid">
+      <button id="languageRo" class="languageButton" type="button" onclick="setLanguage('ro')">Română</button>
+      <button id="languageEn" class="languageButton" type="button" onclick="setLanguage('en')">English</button>
+    </div>
+  </div>
   <section class="settings">
-    <h2>Setari motor</h2>
+    <h2 data-i18n="motorSettings">Setari motor</h2>
     <fieldset id="settingsBox">
       <div class="grid">
-        <label>Ratie reductor
+        <label><span data-i18n="gearRatio">Ratie reductor</span>
           <input id="ratio" type="number" min="1" max="5" step="0.05" value="1">
         </label>
       </div>
       <div id="reverseControl" class="switchRow" style="display:none">
-        <span>Schimba directia de rotatie</span>
+        <span data-i18n="reverseDirection">Schimba directia de rotatie</span>
         <label class="switch">
           <input id="reverse" type="checkbox">
           <span class="slider"></span>
         </label>
       </div>
       <div class="presetBlock">
-        <div class="presetLabel">Viteza rotație (sec/rotație)</div>
+        <div class="presetLabel" data-i18n="rotationSpeed">Viteza rotatie (sec/rotatie)</div>
         <div class="presetGrid">
           <button type="button" class="presetButton" data-preset="4">4s</button>
           <button type="button" class="presetButton selected" data-preset="5">5s</button>
@@ -267,7 +293,7 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
         </div>
       </div>
       <div class="presetBlock">
-        <div class="presetLabel">Oprire automata</div>
+        <div class="presetLabel" data-i18n="automaticStop">Oprire automata</div>
         <div class="timerGrid">
           <button type="button" class="timerButton" data-minutes="10">10 min</button>
           <button type="button" class="timerButton" data-minutes="15">15 min</button>
@@ -275,7 +301,7 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
         </div>
       </div>
       <div class="presetBlock">
-        <div class="presetLabel">Acceleratie (pasi/s^2)</div>
+        <div class="presetLabel" data-i18n="acceleration">Acceleratie (pasi/s^2)</div>
         <div class="presetGrid">
           <button type="button" class="accelButton" data-acceleration="200">200</button>
           <button type="button" class="accelButton selected" data-acceleration="400">400</button>
@@ -285,12 +311,12 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
       </div>
       <div id="tmcSettings">
         <div class="presetBlock">
-          <div class="presetLabel">Driver UART detectat</div>
+          <div class="presetLabel" data-i18n="detectedDriver">Driver UART detectat</div>
           <strong id="tmcDriverName">TMC</strong>
-          <div id="tmcDriverStatus">Verificare UART...</div>
+          <div id="tmcDriverStatus" data-i18n="checkingUart">Verificare UART...</div>
         </div>
         <div class="presetBlock">
-          <div class="presetLabel">Microstepping</div>
+          <div class="presetLabel" data-i18n="microstepping">Microstepping</div>
           <div class="microstepGrid">
             <button type="button" class="microstepButton selected" data-microsteps="4">1/4</button>
             <button type="button" class="microstepButton" data-microsteps="8">1/8</button>
@@ -298,7 +324,7 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
           </div>
         </div>
         <div class="presetBlock">
-          <div class="presetLabel">Curent RUN (mA RMS)</div>
+          <div class="presetLabel" data-i18n="runCurrent">Curent RUN (mA RMS)</div>
           <div class="presetGrid">
             <button type="button" class="currentButton" data-current="600">600</button>
             <button type="button" class="currentButton selected" data-current="800">800</button>
@@ -307,42 +333,73 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
           </div>
         </div>
       </div>
-      <button id="saveSettings" type="button" onclick="askSaveSettings()">SALVEAZA SETARILE</button>
+      <button id="saveSettings" type="button" data-i18n="saveSettings" onclick="askSaveSettings()">SALVEAZA SETARILE</button>
     </fieldset>
     <div id="settingsMsg"></div>
   </section>
   <section class="settings firmwareSettings">
-    <h2>Update firmware</h2>
+    <h2 data-i18n="firmwareUpdate">Update firmware</h2>
     <fieldset id="firmwareBox">
-      <label>Fisier firmware (.bin)
+      <div class="presetLabel" data-i18n="firmwareFile">Fisier firmware (.bin)</div>
+      <div class="filePicker">
+        <label class="fileButton" for="firmwareFile" data-i18n="chooseFile">ALEGE FISIER</label>
+        <span id="firmwareFileName" class="fileName" data-i18n="noFileChosen">Niciun fisier ales</span>
         <input id="firmwareFile" type="file" accept=".bin,application/octet-stream">
-      </label>
-      <button id="updateFirmware" type="button" onclick="askFirmwareUpdate()">UPDATE FIRMWARE</button>
+      </div>
+      <button id="updateFirmware" type="button" data-i18n="updateFirmware" onclick="askFirmwareUpdate()">UPDATE FIRMWARE</button>
     </fieldset>
     <div id="firmwareMsg"></div>
   </section>
 </main>
 <div id="saveModal" class="modal">
   <div class="modalBox">
-    <h2 id="saveModalTitle">Confirmare salvare</h2>
-    <p id="saveModalText">Salvezi noile setari ale motorului in memoria flash?</p>
+    <h2 id="saveModalTitle" data-i18n="saveConfirmation">Confirmare salvare</h2>
+    <p id="saveModalText" data-i18n="saveQuestion">Salvezi noile setari ale motorului in memoria flash?</p>
     <div class="modalActions">
-      <button id="cancelSave" type="button" onclick="closeSaveModal()">ANULEAZA</button>
-      <button id="confirmSave" type="button" onclick="confirmSaveSettings()">SALVEAZA</button>
+      <button id="cancelSave" type="button" data-i18n="cancel" onclick="closeSaveModal()">ANULEAZA</button>
+      <button id="confirmSave" type="button" data-i18n="save" onclick="confirmSaveSettings()">SALVEAZA</button>
     </div>
   </div>
 </div>
 <div id="updateModal" class="modal">
   <div class="modalBox">
-    <h2>Confirmare update</h2>
-    <p>Vrei sa incarci si sa flash-uiesti firmware-ul selectat? ESP32-ul va reporni dupa update.</p>
+    <h2 data-i18n="updateConfirmation">Confirmare update</h2>
+    <p data-i18n="updateQuestion">Vrei sa incarci si sa flash-uiesti firmware-ul selectat? ESP32-ul va reporni dupa update.</p>
     <div class="modalActions">
-      <button id="cancelUpdate" type="button" onclick="closeUpdateModal()">ANULEAZA</button>
-      <button id="confirmUpdate" type="button" onclick="confirmFirmwareUpdate()">UPDATE</button>
+      <button id="cancelUpdate" type="button" data-i18n="cancel" onclick="closeUpdateModal()">ANULEAZA</button>
+      <button id="confirmUpdate" type="button" data-i18n="update" onclick="confirmFirmwareUpdate()">UPDATE</button>
     </div>
   </div>
 </div>
 <script>
+const translations={
+  ro:{settingsTitle:'ESP32 Feeder - Setari',back:'INAPOI',interfaceLanguage:'Limba interfata',motorSettings:'Setari motor',gearRatio:'Ratie reductor',reverseDirection:'Schimba directia de rotatie',rotationSpeed:'Viteza rotatie (sec/rotatie)',automaticStop:'Oprire automata',acceleration:'Acceleratie (pasi/s^2)',detectedDriver:'Driver UART detectat',checkingUart:'Verificare UART...',microstepping:'Microstepping',runCurrent:'Curent RUN (mA RMS)',saveSettings:'SALVEAZA SETARILE',firmwareUpdate:'Update firmware',firmwareFile:'Fisier firmware (.bin)',chooseFile:'ALEGE FISIER',noFileChosen:'Niciun fisier ales',updateFirmware:'UPDATE FIRMWARE',saveConfirmation:'Confirmare salvare',saveQuestion:'Salvezi noile setari ale motorului in memoria flash?',cancel:'ANULEAZA',save:'SALVEAZA',updateConfirmation:'Confirmare update',updateQuestion:'Vrei sa incarci si sa flash-uiesti firmware-ul selectat? ESP32-ul va reporni dupa update.',update:'UPDATE',settingsValidation:'Validare setari',between:'intre',uartOk:'Comunicare UART: OK',uartNoResponse:'Comunicare UART: FARA RASPUNS',chooseBin:'Alege un fisier .bin',uploadingFirmware:'Se incarca firmware-ul...',firmwareUploaded:'Firmware incarcat. ESP32 reporneste...',updateFailed:'Update firmware esuat',stopBeforeUpdate:'Opreste feederul inainte de update firmware',missingFirmware:'Lipseste fisierul firmware',stopBeforeChanges:'Opreste feederul inainte de modificari',saveError:'Eroare salvare',settingsSaved:'Setari salvate'},
+  en:{settingsTitle:'ESP32 Feeder - Settings',back:'BACK',interfaceLanguage:'Interface language',motorSettings:'Motor settings',gearRatio:'Gear ratio',reverseDirection:'Reverse rotation direction',rotationSpeed:'Rotation speed (sec/rotation)',automaticStop:'Automatic stop',acceleration:'Acceleration (steps/s^2)',detectedDriver:'Detected UART driver',checkingUart:'Checking UART...',microstepping:'Microstepping',runCurrent:'RUN current (mA RMS)',saveSettings:'SAVE SETTINGS',firmwareUpdate:'Firmware update',firmwareFile:'Firmware file (.bin)',chooseFile:'CHOOSE FILE',noFileChosen:'No file chosen',updateFirmware:'UPDATE FIRMWARE',saveConfirmation:'Confirm save',saveQuestion:'Save the new motor settings to flash memory?',cancel:'CANCEL',save:'SAVE',updateConfirmation:'Confirm update',updateQuestion:'Upload and flash the selected firmware? The ESP32 will restart after the update.',update:'UPDATE',settingsValidation:'Settings validation',between:'between',uartOk:'UART communication: OK',uartNoResponse:'UART communication: NO RESPONSE',chooseBin:'Choose a .bin file',uploadingFirmware:'Uploading firmware...',firmwareUploaded:'Firmware uploaded. ESP32 is restarting...',updateFailed:'Firmware update failed',stopBeforeUpdate:'Stop the feeder before updating firmware',missingFirmware:'Firmware file is missing',stopBeforeChanges:'Stop the feeder before making changes',saveError:'Save error',settingsSaved:'Settings saved'}
+};
+function getLanguage(){try{return localStorage.getItem('feederLanguage')==='en'?'en':'ro';}catch(e){return 'ro';}}
+let currentLanguage=getLanguage();
+let tmcConnected=null;
+function tr(key){return translations[currentLanguage][key]||key;}
+function updateFileName(){
+  const file=document.getElementById('firmwareFile').files[0];
+  const name=document.getElementById('firmwareFileName');
+  name.textContent=file?file.name:tr('noFileChosen');
+  name.removeAttribute('data-i18n');
+}
+function applyLanguage(){
+  document.documentElement.lang=currentLanguage;
+  document.querySelectorAll('[data-i18n]').forEach(element=>{element.textContent=tr(element.dataset.i18n);});
+  document.getElementById('languageRo').classList.toggle('selected',currentLanguage==='ro');
+  document.getElementById('languageEn').classList.toggle('selected',currentLanguage==='en');
+  if(tmcConnected!==null) document.getElementById('tmcDriverStatus').textContent=tr(tmcConnected?'uartOk':'uartNoResponse');
+  updateFileName();
+}
+function setLanguage(language){
+  currentLanguage=language==='en'?'en':'ro';
+  try{localStorage.setItem('feederLanguage',currentLanguage);}catch(e){}
+  applyLanguage();
+  playClick();
+}
 const AudioContext=window.AudioContext||window.webkitAudioContext;
 let audioCtx=null;
 function initAudio(){if(!audioCtx){audioCtx=new AudioContext();}}
@@ -383,7 +440,7 @@ function getSettingsValidationIssues(){
   const issues=[];
   const ratioValue = Number(document.getElementById('ratio').value);
   if(Number.isNaN(ratioValue) || ratioValue < 1 || ratioValue > 5){
-    issues.push({field:'ratio', label:'Ratie reductor', min:1, max:5});
+    issues.push({field:'ratio', labelKey:'gearRatio', min:1, max:5});
   }
   return issues;
 }
@@ -399,9 +456,9 @@ function showSettingsValidationModal(issues){
   const text=document.getElementById('saveModalText');
   const cancel=document.getElementById('cancelSave');
   const confirm=document.getElementById('confirmSave');
-  title.textContent='Validare setari';
+  title.textContent=tr('settingsValidation');
   text.innerHTML = issues.map(issue =>
-    '<strong>' + issue.label + '</strong>: intre ' + issue.min + ' si ' + issue.max + '<br>'
+    '<strong>' + tr(issue.labelKey) + '</strong>: ' + tr('between') + ' ' + issue.min + ' - ' + issue.max + '<br>'
   ).join('');
   cancel.style.display='none';
   confirm.textContent='OK';
@@ -433,10 +490,10 @@ function askSaveSettings(){
   const text=document.getElementById('saveModalText');
   const cancel=document.getElementById('cancelSave');
   const confirm=document.getElementById('confirmSave');
-  title.textContent='Confirmare salvare';
-  text.textContent='Salvezi noile setari ale motorului in memoria flash?';
+  title.textContent=tr('saveConfirmation');
+  text.textContent=tr('saveQuestion');
   cancel.style.display='block';
-  confirm.textContent='SALVEAZA';
+  confirm.textContent=tr('save');
   confirm.onclick = confirmSaveSettings;
   modal.className='modal open';
 }
@@ -446,7 +503,7 @@ function closeSaveModal(){
   const confirm=document.getElementById('confirmSave');
   modal.className='modal';
   cancel.style.display='block';
-  confirm.textContent='SALVEAZA';
+  confirm.textContent=tr('save');
   confirm.onclick = confirmSaveSettings;
 }
 function confirmSaveSettings(){
@@ -511,7 +568,8 @@ function loadSettings(){
     setMicrostepButtonSelection(s.microsteps);
     setCurrentButtonSelection(s.runCurrent);
     document.getElementById('tmcDriverName').textContent=s.tmcDriverName||'TMC';
-    document.getElementById('tmcDriverStatus').textContent=s.tmcDriverConnected?'Comunicare UART: OK':'Comunicare UART: FARA RASPUNS';
+    tmcConnected=Boolean(s.tmcDriverConnected);
+    document.getElementById('tmcDriverStatus').textContent=tr(tmcConnected?'uartOk':'uartNoResponse');
     document.getElementById('tmcSettings').style.display=s.tmcSettingsAvailable?'block':'none';
     setPresetButtonSelection(clampedPreset);
     setTimerButtonSelection(s.runDurationMinutes ?? 20);
@@ -521,7 +579,7 @@ function loadSettings(){
 function askFirmwareUpdate(){
   const file=document.getElementById('firmwareFile').files[0];
   const msg=document.getElementById('firmwareMsg');
-  if(!file){msg.textContent='Alege un fisier .bin';playClick();return;}
+  if(!file){msg.textContent=tr('chooseBin');playClick();return;}
   playClick();
   document.getElementById('updateModal').className='modal open';
 }
@@ -530,14 +588,14 @@ function confirmFirmwareUpdate(){closeUpdateModal();uploadFirmware();}
 function uploadFirmware(){
   const file=document.getElementById('firmwareFile').files[0];
   const msg=document.getElementById('firmwareMsg');
-  if(!file){msg.textContent='Alege un fisier .bin';return;}
+  if(!file){msg.textContent=tr('chooseBin');return;}
   playClick();
   const body=new FormData();
   body.append('firmware',file,file.name);
-  msg.textContent='Se incarca firmware-ul...';
+  msg.textContent=tr('uploadingFirmware');
   fetch('/update',{method:'POST',body})
-    .then(r=>{if(!r.ok)return r.text().then(t=>{throw new Error(t||'Update esuat');});return r.text();})
-    .then(t=>{msg.textContent=t;playSuccess();})
+    .then(r=>{if(!r.ok)throw new Error(r.status===409?tr('stopBeforeUpdate'):r.status===400?tr('missingFirmware'):tr('updateFailed'));return r.text();})
+    .then(()=>{msg.textContent=tr('firmwareUploaded');playSuccess();})
     .catch(e=>{msg.textContent=e.message;});
 }
 function saveSettings(){
@@ -562,8 +620,8 @@ function saveSettings(){
     reverse:reverseValue
   });
   fetch('/settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
-    .then(r=>{if(!r.ok)throw new Error(r.status===409?'Opreste feederul inainte de modificari':'Eroare salvare');return r.json();})
-    .then(s=>{msg.textContent='Setari salvate';playSuccess();
+    .then(r=>{if(!r.ok)throw new Error(r.status===409?tr('stopBeforeChanges'):tr('saveError'));return r.json();})
+    .then(s=>{msg.textContent=tr('settingsSaved');playSuccess();
       const preset = Number(s.rotationPreset ?? 5);
       const clampedPreset = Math.max(4, Math.min(7, preset));
       document.getElementById('ratio').value=clampRatioValue(s.gearRatio);
@@ -584,6 +642,8 @@ function updateFeederStatus(){
   }).catch(()=>{});
 }
 document.addEventListener('DOMContentLoaded',()=>{
+  applyLanguage();
+  document.getElementById('firmwareFile').addEventListener('change',updateFileName);
   const backBtn=document.querySelector('.back');
   if(backBtn){
     backBtn.addEventListener('click',playClick);
