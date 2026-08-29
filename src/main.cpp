@@ -37,21 +37,14 @@ constexpr uint32_t TmcUartBaudRate = 115200;
 constexpr uint8_t TmcUartAddress = 0;
 constexpr float TmcRsenseOhms = 0.11f;
 constexpr float TmcHoldCurrentMultiplier = 0.5f;
-
-#if TMC_DRIVER_MODEL == TMC_DRIVER_MODEL_2208
-using SelectedTmcDriver = TMC2208Stepper;
-constexpr uint8_t TmcExpectedVersion = 0x20;
-constexpr const char *TmcDriverName = "TMC2208";
-#else
-using SelectedTmcDriver = TMC2209Stepper;
-constexpr uint8_t TmcExpectedVersion = 0x21;
-constexpr const char *TmcDriverName = "TMC2209";
-#endif
 #endif
 
 constexpr uint32_t DefaultTmcRunCurrentMilliamps = 800;
 
 enum class JamRecoveryState : uint8_t { Idle, MoveForward, MoveBackward, Finishing };
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+enum class TmcDriverType : uint8_t { Unknown, Tmc2208, Tmc2209 };
+#endif
 
 FastAccelStepperEngine engine;
 FastAccelStepper *stepper = nullptr;
@@ -59,11 +52,9 @@ Preferences preferences;
 
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
 HardwareSerial tmcSerial(1);
-#if TMC_DRIVER_MODEL == TMC_DRIVER_MODEL_2208
-SelectedTmcDriver tmcDriver(&tmcSerial, TmcRsenseOhms);
-#else
-SelectedTmcDriver tmcDriver(&tmcSerial, TmcRsenseOhms, TmcUartAddress);
-#endif
+TMC2208Stepper tmc2208Driver(&tmcSerial, TmcRsenseOhms);
+TMC2209Stepper tmc2209Driver(&tmcSerial, TmcRsenseOhms, TmcUartAddress);
+TMC2208Stepper *tmcDriver = &tmc2208Driver;
 #endif
 
 uint32_t motorSpeedStepsPerSecond = DefaultMotorSpeedStepsPerSecond;
@@ -95,6 +86,10 @@ uint32_t lastRotationTimeMs = 0;
 bool tmcDiagnosticPending = false;
 uint32_t tmcDiagnosticAtMillis = 0;
 bool tmcDriverConnected = false;
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+TmcDriverType tmcDriverType = TmcDriverType::Unknown;
+char tmcDriverName[16] = "NECUNOSCUT";
+#endif
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
@@ -106,6 +101,9 @@ void writeStatusLed(bool on);
 void updateRotationCounter();
 void updateMotorRunTimer();
 void configureTmcDriver();
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+void detectTmcDriver();
+#endif
 
 FeederWebApp::Dependencies buildWebDependencies() {
   FeederWebApp::Dependencies dependencies;
@@ -127,7 +125,7 @@ FeederWebApp::Dependencies buildWebDependencies() {
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
   dependencies.tmcSettingsAvailable = true;
   dependencies.tmcDriverConnected = &tmcDriverConnected;
-  dependencies.tmcDriverName = TmcDriverName;
+  dependencies.tmcDriverName = tmcDriverName;
 #endif
   dependencies.firmwareVersion = FW_VERSION;
   dependencies.saveMotorSettings = &saveMotorSettings;
@@ -344,25 +342,58 @@ void updateJamRecovery() {
   }
 }
 
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+void detectTmcDriver() {
+  const uint8_t version = static_cast<uint8_t>(tmc2208Driver.IOIN() >> 24);
+
+  switch (version) {
+    case 0x20:
+      tmcDriverType = TmcDriverType::Tmc2208;
+      tmcDriver = &tmc2208Driver;
+      snprintf(tmcDriverName, sizeof(tmcDriverName), "TMC2208");
+      break;
+    case 0x21:
+      tmcDriverType = TmcDriverType::Tmc2209;
+      tmcDriver = &tmc2209Driver;
+      snprintf(tmcDriverName, sizeof(tmcDriverName), "TMC2209");
+      break;
+    default:
+      tmcDriverType = TmcDriverType::Unknown;
+      tmcDriver = &tmc2208Driver;
+      snprintf(tmcDriverName, sizeof(tmcDriverName), "NECUNOSCUT");
+      break;
+  }
+
+  tmcDriverConnected = tmcDriverType != TmcDriverType::Unknown;
+  Serial.printf("TMC autodetect: IOIN.VERSION=0x%02X model=%s\n", version, tmcDriverName);
+}
+#endif
+
 void configureTmcDriver() {
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
-  const uint8_t version = static_cast<uint8_t>(tmcDriver.IOIN() >> 24);
-  tmcDriverConnected = version == TmcExpectedVersion;
   if (!tmcDriverConnected) {
-    Serial.printf("%s nu raspunde; setarea curentului nu a fost aplicata.\n", TmcDriverName);
+    detectTmcDriver();
+  }
+  if (!tmcDriverConnected) {
+    Serial.println("Driver TMC necunoscut sau fara raspuns; setarile UART nu au fost aplicate.");
     return;
   }
 
-  tmcDriver.begin();
-  tmcDriver.I_scale_analog(false);
-  tmcDriver.rms_current(tmcRunCurrentMilliamps, TmcHoldCurrentMultiplier);
-  tmcDriver.microsteps(motorMicrosteps);
-  tmcDriver.intpol(true);
-  tmcDriver.en_spreadCycle(false);
-  tmcDriver.pwm_autoscale(true);
+  tmcDriver->begin();
+  tmcDriver->I_scale_analog(false);
+  tmcDriver->rms_current(tmcRunCurrentMilliamps, TmcHoldCurrentMultiplier);
+  tmcDriver->microsteps(motorMicrosteps);
+  tmcDriver->intpol(true);
+  tmcDriver->en_spreadCycle(false);
+  tmcDriver->pwm_autoscale(true);
+
+  if (tmcDriverType == TmcDriverType::Tmc2209) {
+    tmc2209Driver.TCOOLTHRS(0);
+    tmc2209Driver.SGTHRS(0);
+  }
 
   Serial.printf("%s configurat: RUN=%u mA RMS HOLD=%u mA RMS R_SENSE=%.2f ohm\n",
-                TmcDriverName,
+                tmcDriverName,
                 static_cast<unsigned int>(tmcRunCurrentMilliamps),
                 static_cast<unsigned int>(tmcRunCurrentMilliamps * TmcHoldCurrentMultiplier),
                 TmcRsenseOhms);
@@ -371,31 +402,32 @@ void configureTmcDriver() {
 
 void printTmcSettings() {
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
-  const uint32_t ioin = tmcDriver.IOIN();
+  detectTmcDriver();
+  const uint32_t ioin = tmcDriver->IOIN();
   const uint8_t version = static_cast<uint8_t>(ioin >> 24);
 
-  Serial.printf("--- %s UART ---\n", TmcDriverName);
+  Serial.printf("--- %s UART ---\n", tmcDriverName);
   Serial.printf("address=%u IOIN=0x%08lX version=0x%02X\n",
                 TmcUartAddress,
                 static_cast<unsigned long>(ioin),
                 version);
-  if (version != TmcExpectedVersion) {
-    Serial.printf("%s fara raspuns valid; verifica PDN_UART, GND si adresa MS1/MS2.\n", TmcDriverName);
+  if (!tmcDriverConnected) {
+    Serial.println("Driver TMC fara raspuns valid; verifica PDN_UART, GND si alimentarea.");
     Serial.println("--------------------");
     return;
   }
 
-  const uint32_t gconf = tmcDriver.GCONF();
-  const uint32_t chopconf = tmcDriver.CHOPCONF();
-  const uint32_t iholdIrun = tmcDriver.IHOLD_IRUN();
-  const uint32_t pwmconf = tmcDriver.PWMCONF();
-  const uint32_t drvStatus = tmcDriver.DRV_STATUS();
+  const uint32_t gconf = tmcDriver->GCONF();
+  const uint32_t chopconf = tmcDriver->CHOPCONF();
+  const uint32_t iholdIrun = tmcDriver->IHOLD_IRUN();
+  const uint32_t pwmconf = tmcDriver->PWMCONF();
+  const uint32_t drvStatus = tmcDriver->DRV_STATUS();
   const uint8_t mres = static_cast<uint8_t>((chopconf >> 24) & 0x0F);
   const uint16_t microsteps = mres <= 8 ? static_cast<uint16_t>(256U >> mres) : 0;
   const uint8_t holdCurrentScale = static_cast<uint8_t>(iholdIrun & 0x1F);
   const uint8_t runCurrentScale = static_cast<uint8_t>((iholdIrun >> 8) & 0x1F);
-  const uint16_t holdCurrentMilliamps = tmcDriver.cs2rms(holdCurrentScale);
-  const uint16_t runCurrentMilliamps = tmcDriver.cs2rms(runCurrentScale);
+  const uint16_t holdCurrentMilliamps = tmcDriver->cs2rms(holdCurrentScale);
+  const uint16_t runCurrentMilliamps = tmcDriver->cs2rms(runCurrentScale);
 
   Serial.printf("GCONF=0x%08lX spreadCycle=%s pdnDisable=%s mstepRegSelect=%s\n",
                 static_cast<unsigned long>(gconf),
@@ -414,17 +446,17 @@ void printTmcSettings() {
   Serial.printf("PWMCONF=0x%08lX\n", static_cast<unsigned long>(pwmconf));
   Serial.printf("DRV_STATUS=0x%08lX ot=%s otpw=%s stealthChop=%s standstill=%s\n",
                 static_cast<unsigned long>(drvStatus),
-                tmcDriver.ot() ? "YES" : "NO",
-                tmcDriver.otpw() ? "YES" : "NO",
-                tmcDriver.stealth() ? "YES" : "NO",
-                tmcDriver.stst() ? "YES" : "NO");
+                tmcDriver->ot() ? "YES" : "NO",
+                tmcDriver->otpw() ? "YES" : "NO",
+                tmcDriver->stealth() ? "YES" : "NO",
+                tmcDriver->stst() ? "YES" : "NO");
   Serial.printf("Faze: openA=%s openB=%s shortA=%s shortB=%s CS_ACTUAL=%lu\n",
-                tmcDriver.ola() ? "YES" : "NO",
-                tmcDriver.olb() ? "YES" : "NO",
-                tmcDriver.s2ga() ? "YES" : "NO",
-                tmcDriver.s2gb() ? "YES" : "NO",
-                static_cast<unsigned long>(tmcDriver.cs_actual()));
-  Serial.printf("IFCNT=%u\n", tmcDriver.IFCNT());
+                tmcDriver->ola() ? "YES" : "NO",
+                tmcDriver->olb() ? "YES" : "NO",
+                tmcDriver->s2ga() ? "YES" : "NO",
+                tmcDriver->s2gb() ? "YES" : "NO",
+                static_cast<unsigned long>(tmcDriver->cs_actual()));
+  Serial.printf("IFCNT=%u\n", tmcDriver->IFCNT());
   Serial.println("Rezumat configuratie:");
   Serial.printf("  RUN: aproximativ %u mA RMS\n", runCurrentMilliamps);
   Serial.printf("  HOLD: aproximativ %u mA RMS\n", holdCurrentMilliamps);
@@ -567,8 +599,7 @@ void setup() {
 
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
   tmcSerial.begin(TmcUartBaudRate, SERIAL_8N1, Pins::TmcUartRx, Pins::TmcUartTx);
-  Serial.printf("%s UART: RX=GPIO%u TX=GPIO%u baud=%lu address=%u\n",
-                TmcDriverName,
+  Serial.printf("TMC UART autodetect: RX=GPIO%u TX=GPIO%u baud=%lu address=%u\n",
                 Pins::TmcUartRx,
                 Pins::TmcUartTx,
                 static_cast<unsigned long>(TmcUartBaudRate),
@@ -587,6 +618,12 @@ void setup() {
   writeStatusLed(false);
   setMotorEnabled(false);
 
+  webApp.begin();
+
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  detectTmcDriver();
+#endif
+
   engine.init();
   stepper = engine.stepperConnectToPin(Pins::Step);
   if (stepper != nullptr) {
@@ -603,8 +640,6 @@ void setup() {
   lastHallState = digitalRead(Pins::HallSensor) == HallSensorActiveLevel;
   lastHallTransitionMillis = 0;
   lastRotationTimeMs = 0;
-
-  webApp.begin();
 
   Serial.print(BoardName);
   Serial.println(" feeder gata. Apasa butonul pentru start/stop.");

@@ -285,7 +285,7 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
       </div>
       <div id="tmcSettings">
         <div class="presetBlock">
-          <div class="presetLabel">Driver UART configurat</div>
+          <div class="presetLabel">Driver UART detectat</div>
           <strong id="tmcDriverName">TMC</strong>
           <div id="tmcDriverStatus">Verificare UART...</div>
         </div>

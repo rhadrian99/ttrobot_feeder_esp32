@@ -13,7 +13,7 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 in modul STEP/DIR, folosin
 - Aplicatia web afiseaza versiunea firmware care ruleaza.
 - Pagina principala afiseaza timpul ramas pana la oprirea automata si o bara de progres.
 - Din aplicatia web se pot modifica ratia reductorului, optional directia, timpul unei rotatii, acceleratia si, pe C3, microstepping-ul si curentul driverului TMC.
-- Pagina de setari afiseaza modelul TMC selectat la compilare si rezultatul ultimei verificari UART.
+- Pagina de setari afiseaza modelul TMC detectat la pornire si rezultatul ultimei verificari UART.
 - Durata maxima de functionare poate fi setata la `10`, `15` sau `20` minute; valoarea implicita este `20` minute.
 - Din aplicatia web se poate incarca un firmware `.bin` nou si flash-ui in slotul OTA liber, cu confirmare inainte de update.
 - Setarile motorului sunt salvate in flash si sunt reincarcate la pornire.
@@ -145,23 +145,21 @@ GPIO6-GPIO11 nu sunt folositi deoarece pe modulele ESP32-WROOM sunt legati de me
 
 Pinii STEP, DIR si ENABLE din tabel sunt aceiasi pentru TMC2208 si TMC2209. Pentru legatura UART single-wire, RX se leaga la `PDN_UART`, iar TX ajunge pe aceeasi linie prin rezistenta de `1 kOhm`. Toate masele trebuie sa fie comune.
 
-### Selectarea TMC2208 sau TMC2209 pe C3
+### Autodetectarea TMC2208 sau TMC2209 pe C3
 
-Modelul se selecteaza la compilare in `src/board_config.h`:
+Modelul nu mai este selectat la compilare. La pornire, firmware-ul initializeaza UART-ul, porneste Access Point-ul si citeste imediat `IOIN.VERSION`, inainte ca motorul sa poata fi pornit. Reaplicarea setarilor reutilizeaza modelul detectat; daca driverul nu a raspuns la boot, firmware-ul reincearca detectarea la urmatoarea salvare a setarilor.
 
-```cpp
-#define TMC_DRIVER_MODEL TMC_DRIVER_MODEL_2208
-```
+| `IOIN.VERSION` | Driver detectat |
+| --- | --- |
+| `0x20` | TMC2208 |
+| `0x21` | TMC2209 |
+| alta valoare | necunoscut sau fara raspuns UART |
 
-Pentru TMC2209 se foloseste:
+Pentru `0x20`, operatiile sunt executate prin obiectul `TMC2208Stepper`. Pentru `0x21`, firmware-ul selecteaza obiectul `TMC2209Stepper` si poate aplica registrele specifice TMC2209. Pragul StallGuard este dezactivat explicit deoarece detectarea blocajului din proiect foloseste senzorul Hall.
 
-```cpp
-#define TMC_DRIVER_MODEL TMC_DRIVER_MODEL_2209
-```
+Autodetectarea curenta verifica adresa UART `0`. Aceasta este adresa fixa a TMC2208 si configuratia uzuala pentru TMC2209 cu MS1/MS2 pe adresa zero. Un TMC2209 configurat la alta adresa nu va fi detectat pana cand firmware-ul nu va scana adresele `1-3`.
 
-Configuratia curenta este pentru modulul BIGTREETECH TMC2208 V3.0. Cele doua rezistente marcate `R110` indica `R_SENSE = 0.11 Ohm`, valoare folosita de calculul curentului RMS. TMC2208 foloseste adresa UART fixa si constructorul fara parametru de adresa; TMC2209 foloseste adresa `0`, configurabila hardware prin MS1/MS2.
-
-La initializare, firmware-ul citeste `IOIN.VERSION`: asteapta `0x20` pentru TMC2208 si `0x21` pentru TMC2209. Daca versiunea nu corespunde, setarile UART nu sunt aplicate si este raportata eroarea pe seriala. Pagina de setari afiseaza separat modelul configurat si starea comunicatiei UART.
+Modulul BIGTREETECH TMC2208 V3.0 folosit la test are doua rezistente marcate `R110`, deci `R_SENSE = 0.11 Ohm`. Aceasta valoare este folosita de calculul curentului RMS pentru ambele obiecte de driver.
 
 ## Cum functioneaza codul
 
@@ -273,7 +271,7 @@ Afisarea controlului de directie este stabilita in `src/board_config.h`:
 
 Cu valoarea `0`, controlul este ascuns, sensul normal este fortat la citirea NVS si la orice salvare, iar o valoare `reverse=true` ramasa dintr-un firmware anterior nu mai poate porni motorul invers fara indicatie in UI. Cu valoarea `1`, switch-ul este afisat si directia aleasa este salvata in NVS.
 
-Pe C3, sectiunea TMC afiseaza `TMC2208` sau `TMC2209`, conform modelului selectat la compilare, si `Comunicare UART: OK` numai daca `IOIN.VERSION` a corespuns modelului la ultima configurare. Mesajul `FARA RASPUNS` indica de obicei model selectat gresit, cablaj PDN_UART incorect sau lipsa masei comune.
+Pe C3, sectiunea TMC afiseaza `TMC2208` sau `TMC2209` conform valorii `IOIN.VERSION` citite de pe placa si `Comunicare UART: OK` atunci cand driverul a raspuns valid. `NECUNOSCUT` si `FARA RASPUNS` indica de obicei cablaj PDN_UART incorect, lipsa masei comune, driver nealimentat sau un TMC2209 configurat la alta adresa UART.
 
 Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint-ul `/settings` refuza si el salvarea cu status `409` daca feederul ruleaza, deci protectia exista si in firmware, nu doar in interfata.
 
