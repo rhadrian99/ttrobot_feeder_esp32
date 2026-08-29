@@ -25,6 +25,8 @@ class FeederWebApp {
     uint32_t *motorSessionStartMillis = nullptr;
     bool *motorSessionActive = nullptr;
     bool tmcSettingsAvailable = false;
+    bool *tmcDriverConnected = nullptr;
+    const char *tmcDriverName = nullptr;
     const char *firmwareVersion = nullptr;
     void (*saveMotorSettings)() = nullptr;
     void (*applyMotorSettings)() = nullptr;

@@ -5,7 +5,20 @@
 // Configuratie pini si LED per placa.
 // Se selecteaza automat in functie de tinta de compilare (WROOM vs C3).
 
+// 0 fixeaza sensul normal si ascunde controlul din pagina de setari.
+#define ENABLE_DIRECTION_CONTROL 0
+
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
+
+#define TMC_DRIVER_MODEL_2208 2208
+#define TMC_DRIVER_MODEL_2209 2209
+
+// Selecteaza driverul UART montat pe placa: TMC_DRIVER_MODEL_2208 sau TMC_DRIVER_MODEL_2209.
+#define TMC_DRIVER_MODEL TMC_DRIVER_MODEL_2208
+
+#if TMC_DRIVER_MODEL != TMC_DRIVER_MODEL_2208 && TMC_DRIVER_MODEL != TMC_DRIVER_MODEL_2209
+#error "TMC_DRIVER_MODEL trebuie sa fie TMC_DRIVER_MODEL_2208 sau TMC_DRIVER_MODEL_2209"
+#endif
 
 namespace Pins {
 constexpr uint8_t Step = 7;

@@ -51,7 +51,7 @@ button:disabled{opacity:.48;cursor:not-allowed}
 <body>
 <main class="panel">
   <h1 id="appTitle">ESP32 Feeder</h1>
-  <div class="sub">Access Point local: http://192.168.4.1</div>
+  <div class="sub">Access Point local: <span style="color:white;">192.168.4.1</span></div>
   <section class="status">
     <div class="label">Stare feeder</div>
     <div id="state" class="off">OPRIT</div>
@@ -192,7 +192,7 @@ const char SettingsHtml[] = R"rawliteral(
 body{min-height:100vh;font-family:Verdana,Geneva,sans-serif;background:#101820;color:#f4f0e8;display:grid;place-items:center;padding:18px}
 .panel{width:min(430px,100%);border:1px solid #314052;background:#172330;border-radius:8px;padding:20px;box-shadow:0 18px 45px rgba(0,0,0,.35)}
 h1{font-size:26px;text-align:center;margin-bottom:8px;color:#f9c74f;letter-spacing:0}
-.sub{text-align:center;color:#9fb3c8;font-size:13px;margin-bottom:18px}
+.sub{text-align:center;color:#ffffff;font-size:15px;margin-bottom:18px}
 button{width:100%;border:0;border-radius:8px;padding:17px;font-size:22px;font-weight:700;color:#101820;background:#90be6d;cursor:pointer;touch-action:manipulation}
 button.back{background:#5a7c99;color:#f4f0e8;font-size:16px;margin-bottom:14px}
 .settings{background:transparent;border:0;border-radius:0;padding:0;margin-bottom:14px}
@@ -210,7 +210,7 @@ input[type=file]{font-size:13px;color:#b8c5d1}
 .slider:before{content:"";position:absolute;width:24px;height:24px;left:3px;bottom:3px;background:#f4f0e8;border-radius:50%;transition:.2s}
 .switch input:checked+.slider{background:#f94144}
 .switch input:checked+.slider:before{transform:translateX(24px)}
-#saveSettings{margin-top:12px;font-size:16px;padding:13px;background:#f9c74f;color:#101820}
+#saveSettings{margin-top:32px;font-size:16px;padding:13px;background:#f9c74f;color:#101820}
 #updateFirmware{margin-top:12px;font-size:16px;padding:13px;background:#f3722c;color:#101820}
 #settingsBox[disabled]{opacity:.48}
 #firmwareBox[disabled]{opacity:.48}
@@ -250,7 +250,7 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
           <input id="ratio" type="number" min="1" max="5" step="0.05" value="1">
         </label>
       </div>
-      <div class="switchRow">
+      <div id="reverseControl" class="switchRow" style="display:none">
         <span>Schimba directia de rotatie</span>
         <label class="switch">
           <input id="reverse" type="checkbox">
@@ -258,7 +258,7 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
         </label>
       </div>
       <div class="presetBlock">
-        <div class="presetLabel">Presetare rotație (sec/rotație)</div>
+        <div class="presetLabel">Viteza rotație (sec/rotație)</div>
         <div class="presetGrid">
           <button type="button" class="presetButton" data-preset="4">4s</button>
           <button type="button" class="presetButton selected" data-preset="5">5s</button>
@@ -284,6 +284,11 @@ fieldset{border:0;padding:0;margin:0;min-inline-size:0}
         </div>
       </div>
       <div id="tmcSettings">
+        <div class="presetBlock">
+          <div class="presetLabel">Driver UART configurat</div>
+          <strong id="tmcDriverName">TMC</strong>
+          <div id="tmcDriverStatus">Verificare UART...</div>
+        </div>
         <div class="presetBlock">
           <div class="presetLabel">Microstepping</div>
           <div class="microstepGrid">
@@ -493,10 +498,20 @@ function loadSettings(){
     const clampedPreset = Math.max(4, Math.min(7, preset));
 
     document.getElementById('ratio').value=s.gearRatio;
-    document.getElementById('reverse').checked=s.reverse;
+    const reverseElement = document.getElementById('reverse');
+    if(reverseElement) reverseElement.checked=s.reverse;
+
+    // Control visibility of direction control based on server flag
+    const reverseControl = document.getElementById('reverseControl');
+    if(reverseControl) {
+      reverseControl.style.display = s.showDirectionControl !== false ? 'flex' : 'none';
+    }
+
     setAccelerationButtonSelection(s.acceleration);
     setMicrostepButtonSelection(s.microsteps);
     setCurrentButtonSelection(s.runCurrent);
+    document.getElementById('tmcDriverName').textContent=s.tmcDriverName||'TMC';
+    document.getElementById('tmcDriverStatus').textContent=s.tmcDriverConnected?'Comunicare UART: OK':'Comunicare UART: FARA RASPUNS';
     document.getElementById('tmcSettings').style.display=s.tmcSettingsAvailable?'block':'none';
     setPresetButtonSelection(clampedPreset);
     setTimerButtonSelection(s.runDurationMinutes ?? 20);
@@ -535,6 +550,8 @@ function saveSettings(){
   const selectedRunDuration = document.querySelector('.timerButton.selected')?.dataset.minutes || 20;
   const validatedRatio = clampRatioValue(ratioField.value);
   ratioField.value = validatedRatio;
+  const reverseElement = document.getElementById('reverse');
+  const reverseValue = reverseElement ? (reverseElement.checked ? '1' : '0') : '0';
   const body=new URLSearchParams({
     acceleration:selectedAcceleration,
     microsteps:selectedMicrosteps,
@@ -542,7 +559,7 @@ function saveSettings(){
     rotationPreset:selectedPreset,
     runDurationMinutes:selectedRunDuration,
     gearRatio:validatedRatio,
-    reverse:document.getElementById('reverse').checked?'1':'0'
+    reverse:reverseValue
   });
   fetch('/settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
     .then(r=>{if(!r.ok)throw new Error(r.status===409?'Opreste feederul inainte de modificari':'Eroare salvare');return r.json();})
@@ -550,7 +567,8 @@ function saveSettings(){
       const preset = Number(s.rotationPreset ?? 5);
       const clampedPreset = Math.max(4, Math.min(7, preset));
       document.getElementById('ratio').value=clampRatioValue(s.gearRatio);
-      document.getElementById('reverse').checked=s.reverse;
+      const reverseElem = document.getElementById('reverse');
+      if(reverseElem) reverseElem.checked=s.reverse;
       setAccelerationButtonSelection(s.acceleration);
       setMicrostepButtonSelection(s.microsteps);
       setCurrentButtonSelection(s.runCurrent);
@@ -729,7 +747,7 @@ void FeederWebApp::onStatus() {
       : 0;
   }
 
-  char json[430];
+  char json[470];
   snprintf(
     json,
     sizeof(json),
@@ -757,11 +775,11 @@ void FeederWebApp::sendSettings() {
   const uint32_t presetValue = deps_.rotationPreset != nullptr
     ? *deps_.rotationPreset
     : (secondsPerRotation > 0.0f ? static_cast<uint32_t>(lroundf(outputStepsPerRotation / secondsPerRotation)) : 5u);
-  char json[360];
+  char json[430];
   snprintf(
     json,
     sizeof(json),
-    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s,\"rotationPreset\":%lu,\"secondsPerRotation\":%.2f,\"runDurationMinutes\":%lu,\"microsteps\":%lu,\"runCurrent\":%lu,\"tmcSettingsAvailable\":%s}",
+    "{\"speed\":%lu,\"acceleration\":%lu,\"gearRatio\":%.2f,\"reverse\":%s,\"rotationPreset\":%lu,\"secondsPerRotation\":%.2f,\"runDurationMinutes\":%lu,\"microsteps\":%lu,\"runCurrent\":%lu,\"tmcSettingsAvailable\":%s,\"tmcDriverName\":\"%s\",\"tmcDriverConnected\":%s,\"showDirectionControl\":%s}",
     static_cast<unsigned long>(*deps_.motorSpeedStepsPerSecond),
     static_cast<unsigned long>(*deps_.motorAccelerationStepsPerSecond2),
     *deps_.gearRatio,
@@ -771,7 +789,10 @@ void FeederWebApp::sendSettings() {
     deps_.motorRunDurationMinutes != nullptr ? static_cast<unsigned long>(*deps_.motorRunDurationMinutes) : 20UL,
     static_cast<unsigned long>(microsteps),
     static_cast<unsigned long>(runCurrent),
-    deps_.tmcSettingsAvailable ? "true" : "false"
+    deps_.tmcSettingsAvailable ? "true" : "false",
+    deps_.tmcDriverName != nullptr ? deps_.tmcDriverName : "",
+    (deps_.tmcDriverConnected != nullptr && *deps_.tmcDriverConnected) ? "true" : "false",
+    ENABLE_DIRECTION_CONTROL ? "true" : "false"
   );
   server_.send(200, "application/json", json);
 }
@@ -821,7 +842,11 @@ void FeederWebApp::onPostSettings() {
   *deps_.motorAccelerationStepsPerSecond2 = acceleration;
 
   *deps_.gearRatio = constrainFloat(requestedGearRatio, kMinGearRatio, kMaxGearRatio);
+#if ENABLE_DIRECTION_CONTROL
   *deps_.reverseRotation = server_.arg("reverse") == "1";
+#else
+  *deps_.reverseRotation = false;
+#endif
   if (deps_.tmcSettingsAvailable) {
     *deps_.motorMicrosteps = microsteps;
     *deps_.tmcRunCurrentMilliamps = runCurrent;

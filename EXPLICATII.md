@@ -1,6 +1,6 @@
 # Explicatii proiect ESP32 feeder
 
-Acest proiect controleaza un motor pas cu pas NEMA 17 in modul STEP/DIR, folosind un ESP32-WROOM / ESP32 DevKit sau un ESP32-C3 SuperMini. Varianta C3 foloseste un TMC2209 configurat si diagnosticat prin UART, iar varianta WROOM pastreaza compatibilitatea STEP/DIR existenta.
+Acest proiect controleaza un motor pas cu pas NEMA 17 in modul STEP/DIR, folosind un ESP32-WROOM / ESP32 DevKit sau un ESP32-C3 SuperMini. Varianta C3 poate folosi un TMC2208 sau TMC2209 configurat si diagnosticat prin UART, iar varianta WROOM pastreaza compatibilitatea STEP/DIR existenta.
 
 ## Pe scurt
 
@@ -12,7 +12,8 @@ Acest proiect controleaza un motor pas cu pas NEMA 17 in modul STEP/DIR, folosin
 - Din aplicatia web se poate porni/opri feederul cu un buton START/STOP.
 - Aplicatia web afiseaza versiunea firmware care ruleaza.
 - Pagina principala afiseaza timpul ramas pana la oprirea automata si o bara de progres.
-- Din aplicatia web se pot modifica ratia reductorului, directia, timpul unei rotatii, acceleratia si, pe C3, microstepping-ul si curentul TMC2209.
+- Din aplicatia web se pot modifica ratia reductorului, optional directia, timpul unei rotatii, acceleratia si, pe C3, microstepping-ul si curentul driverului TMC.
+- Pagina de setari afiseaza modelul TMC selectat la compilare si rezultatul ultimei verificari UART.
 - Durata maxima de functionare poate fi setata la `10`, `15` sau `20` minute; valoarea implicita este `20` minute.
 - Din aplicatia web se poate incarca un firmware `.bin` nou si flash-ui in slotul OTA liber, cu confirmare inainte de update.
 - Setarile motorului sunt salvate in flash si sunt reincarcate la pornire.
@@ -64,7 +65,7 @@ lib_deps =
   teemuatlut/TMCStepper@^0.7.3
 ```
 
-`FastAccelStepper` genereaza impulsurile STEP mai precis decat o bucla manuala cu `delayMicroseconds`, ceea ce ajuta la miscarea mai stabila a motorului. `TMCStepper` configureaza si citeste registrele TMC2209 prin UART pe ESP32-C3.
+`FastAccelStepper` genereaza impulsurile STEP mai precis decat o bucla manuala cu `delayMicroseconds`, ceea ce ajuta la miscarea mai stabila a motorului. `TMCStepper` configureaza si citeste registrele TMC2208 sau TMC2209 prin UART pe ESP32-C3.
 
 Bibliotecile `WiFi`, `DNSServer` si `WebServer` vin din framework-ul Arduino pentru ESP32 si sunt folosite pentru Access Point, captive portal si pagina web de control. Biblioteca `Preferences` este folosita pentru salvarea setarilor motorului in flash.
 
@@ -133,14 +134,34 @@ GPIO6-GPIO11 nu sunt folositi deoarece pe modulele ESP32-WROOM sunt legati de me
 
 | Pin ESP32-C3 | Rol |
 | --- | --- |
-| GPIO7 | STEP catre TMC2209 |
-| GPIO6 | DIR catre TMC2209 |
-| GPIO10 | ENABLE catre TMC2209 |
+| GPIO7 | STEP catre TMC2208/TMC2209 |
+| GPIO6 | DIR catre TMC2208/TMC2209 |
+| GPIO10 | ENABLE catre TMC2208/TMC2209 |
 | GPIO5 | Buton catre GND |
 | GPIO4 | Semnal senzor Hall, activ pe LOW |
 | GPIO8 | LED onboard, activ pe LOW |
-| GPIO0 | RX UART, direct la PDN_UART TMC2209 |
+| GPIO0 | RX UART, direct la PDN_UART TMC2208/TMC2209 |
 | GPIO1 | TX UART, la PDN_UART prin rezistenta de 1 kOhm |
+
+Pinii STEP, DIR si ENABLE din tabel sunt aceiasi pentru TMC2208 si TMC2209. Pentru legatura UART single-wire, RX se leaga la `PDN_UART`, iar TX ajunge pe aceeasi linie prin rezistenta de `1 kOhm`. Toate masele trebuie sa fie comune.
+
+### Selectarea TMC2208 sau TMC2209 pe C3
+
+Modelul se selecteaza la compilare in `src/board_config.h`:
+
+```cpp
+#define TMC_DRIVER_MODEL TMC_DRIVER_MODEL_2208
+```
+
+Pentru TMC2209 se foloseste:
+
+```cpp
+#define TMC_DRIVER_MODEL TMC_DRIVER_MODEL_2209
+```
+
+Configuratia curenta este pentru modulul BIGTREETECH TMC2208 V3.0. Cele doua rezistente marcate `R110` indica `R_SENSE = 0.11 Ohm`, valoare folosita de calculul curentului RMS. TMC2208 foloseste adresa UART fixa si constructorul fara parametru de adresa; TMC2209 foloseste adresa `0`, configurabila hardware prin MS1/MS2.
+
+La initializare, firmware-ul citeste `IOIN.VERSION`: asteapta `0x20` pentru TMC2208 si `0x21` pentru TMC2209. Daca versiunea nu corespunde, setarile UART nu sunt aplicate si este raportata eroarea pe seriala. Pagina de setari afiseaza separat modelul configurat si starea comunicatiei UART.
 
 ## Cum functioneaza codul
 
@@ -176,6 +197,8 @@ La salvare, `saveMotorSettings()` scrie aceleasi valori in flash. Valorile sunt 
 Debounce-ul butonului este de `35 ms`. Presetul este limitat la `4-7` secunde/rotatie, acceleratia foloseste presetarile `200`, `400`, `600` si `800` pasi/s^2, iar ratia reductorului este limitata la `1-5`.
 
 Pe C3, microstepping-ul poate fi `1/4`, `1/8` sau `1/16`, iar curentul RUN poate fi `600`, `800`, `900` sau `1000 mA RMS`. Curentul HOLD este calculat automat la 50% din RUN. Salvarea reaplica imediat microstepping-ul si curentul prin UART, apoi recalculeaza frecventa STEP pentru a pastra perioada mecanica selectata.
+
+Diagnosticul serial citeste registrele comune ambelor drivere: `GCONF`, `CHOPCONF`, `IHOLD_IRUN`, `PWMCONF`, `DRV_STATUS` si `IFCNT`. Starile de supratemperatura, scurtcircuit, bobina deschisa, StealthChop si standstill sunt citite prin accessorii bibliotecii `TMCStepper`, nu prin masti de biti comune presupuse.
 
 ### Pornirea si oprirea motorului
 
@@ -235,12 +258,22 @@ updateStatusLed();
 Sectiunea de setari din pagina web contine:
 
 - ratia reductorului, implicit `1`;
-- un switch pentru inversarea directiei de rotatie;
+- optional, un switch pentru inversarea directiei de rotatie;
 - presetul pentru perioada unei rotatii: `4`, `5`, `6` sau `7` secunde;
 - durata pana la oprirea automata: `10`, `15` sau `20` minute, implicit `20` minute;
 - acceleratia: `200`, `400`, `600` sau `800` pasi/s^2, implicit `400`;
 - pe C3, microstepping `1/4`, `1/8` sau `1/16`;
 - pe C3, curent RUN `600`, `800`, `900` sau `1000 mA RMS`.
+
+Afisarea controlului de directie este stabilita in `src/board_config.h`:
+
+```cpp
+#define ENABLE_DIRECTION_CONTROL 0
+```
+
+Cu valoarea `0`, controlul este ascuns, sensul normal este fortat la citirea NVS si la orice salvare, iar o valoare `reverse=true` ramasa dintr-un firmware anterior nu mai poate porni motorul invers fara indicatie in UI. Cu valoarea `1`, switch-ul este afisat si directia aleasa este salvata in NVS.
+
+Pe C3, sectiunea TMC afiseaza `TMC2208` sau `TMC2209`, conform modelului selectat la compilare, si `Comunicare UART: OK` numai daca `IOIN.VERSION` a corespuns modelului la ultima configurare. Mesajul `FARA RASPUNS` indica de obicei model selectat gresit, cablaj PDN_UART incorect sau lipsa masei comune.
 
 Campurile sunt dezactivate automat cat timp `motorRunning` este `true`. Endpoint-ul `/settings` refuza si el salvarea cu status `409` daca feederul ruleaza, deci protectia exista si in firmware, nu doar in interfata.
 
@@ -260,7 +293,7 @@ Sectiunea este dezactivata in interfata cat timp `motorRunning` este `true`, iar
 
 ## Observatii de review
 
-Codul este potrivit pentru scopul actual: simplu, neblocant si usor de modificat. Separarea functiilor face clar ce parte controleaza motorul, ce parte citeste butonul si senzorul Hall si ce parte gestioneaza aplicatia web.
+Review-ul curent a verificat selectia TMC2208/TMC2209, persistenta NVS, pagina de setari, diagnosticul UART, controlul directiei si build-urile C3/WROOM. Codul ramane simplu si neblocant, iar separarea functiilor delimiteaza controlul motorului, citirea butonului si senzorului Hall de aplicatia web.
 
 Puncte bune:
 
@@ -272,6 +305,9 @@ Puncte bune:
 - incearca o recuperare limitata si trece in stare de eroare dupa doua blocari consecutive;
 - nu foloseste GPIO6-GPIO11 pe ESP32-WROOM;
 - butonul foloseste pull-up intern, deci necesita cablaj minim.
+- valideaza modelul TMC prin `IOIN.VERSION` inainte de aplicarea setarilor UART;
+- permite compilarea aceluiasi firmware C3 pentru TMC2208 sau TMC2209;
+- nu pastreaza o directie inversata invizibila atunci cand controlul de directie este dezactivat.
 
 Riscuri / lucruri de verificat pe placa reala:
 
@@ -280,6 +316,7 @@ Riscuri / lucruri de verificat pe placa reala:
 - Viteza si acceleratia sunt conservative, dar trebuie ajustate dupa mecanica, tensiune, curentul driverului si microstepping.
 - Butonul nu are rezistor extern sau condensator de filtrare; debounce-ul software este suficient pentru test, dar la fire lungi poate fi nevoie de filtrare hardware.
 - Senzorul Hall trebuie montat astfel incat sa produca un singur impuls clar la fiecare rotatie; zgomotul sau mai multi magneti vor altera numaratoarea si detectarea blocajului.
+- Raspunsul HTTP de salvare nu diferentiaza inca fiecare eroare individuala `Preferences::put*`; o eroare rara de scriere NVS poate aplica valorile doar in RAM pana la restart. Mesajele seriale trebuie verificate daca setarile nu persista.
 
 ## Daca motorul sau driverul se incalzeste prea tare
 

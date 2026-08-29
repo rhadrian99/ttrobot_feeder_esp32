@@ -37,6 +37,16 @@ constexpr uint32_t TmcUartBaudRate = 115200;
 constexpr uint8_t TmcUartAddress = 0;
 constexpr float TmcRsenseOhms = 0.11f;
 constexpr float TmcHoldCurrentMultiplier = 0.5f;
+
+#if TMC_DRIVER_MODEL == TMC_DRIVER_MODEL_2208
+using SelectedTmcDriver = TMC2208Stepper;
+constexpr uint8_t TmcExpectedVersion = 0x20;
+constexpr const char *TmcDriverName = "TMC2208";
+#else
+using SelectedTmcDriver = TMC2209Stepper;
+constexpr uint8_t TmcExpectedVersion = 0x21;
+constexpr const char *TmcDriverName = "TMC2209";
+#endif
 #endif
 
 constexpr uint32_t DefaultTmcRunCurrentMilliamps = 800;
@@ -49,7 +59,11 @@ Preferences preferences;
 
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
 HardwareSerial tmcSerial(1);
-TMC2209Stepper tmcDriver(&tmcSerial, TmcRsenseOhms, TmcUartAddress);
+#if TMC_DRIVER_MODEL == TMC_DRIVER_MODEL_2208
+SelectedTmcDriver tmcDriver(&tmcSerial, TmcRsenseOhms);
+#else
+SelectedTmcDriver tmcDriver(&tmcSerial, TmcRsenseOhms, TmcUartAddress);
+#endif
 #endif
 
 uint32_t motorSpeedStepsPerSecond = DefaultMotorSpeedStepsPerSecond;
@@ -80,6 +94,7 @@ uint32_t lastHallTransitionMillis = 0;
 uint32_t lastRotationTimeMs = 0;
 bool tmcDiagnosticPending = false;
 uint32_t tmcDiagnosticAtMillis = 0;
+bool tmcDriverConnected = false;
 
 void setMotorEnabled(bool enabled);
 void toggleMotor();
@@ -111,6 +126,8 @@ FeederWebApp::Dependencies buildWebDependencies() {
   dependencies.motorSessionActive = &motorSessionActive;
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
   dependencies.tmcSettingsAvailable = true;
+  dependencies.tmcDriverConnected = &tmcDriverConnected;
+  dependencies.tmcDriverName = TmcDriverName;
 #endif
   dependencies.firmwareVersion = FW_VERSION;
   dependencies.saveMotorSettings = &saveMotorSettings;
@@ -160,6 +177,9 @@ void loadMotorSettings() {
     rotationPreset = constrain(rotationPreset, MinRotationPreset, MaxRotationPreset);
     motorAccelerationStepsPerSecond2 = constrain(motorAccelerationStepsPerSecond2, MinMotorAccelerationStepsPerSecond2, MaxMotorAccelerationStepsPerSecond2);
     gearRatio = constrainFloat(gearRatio, MinGearRatio, MaxGearRatio);
+  #if !ENABLE_DIRECTION_CONTROL
+    reverseRotation = false;
+  #endif
     if (motorRunDurationMinutes != 10 && motorRunDurationMinutes != 15 && motorRunDurationMinutes != 20) {
       motorRunDurationMinutes = DefaultMotorRunDurationMinutes;
     }
@@ -327,8 +347,9 @@ void updateJamRecovery() {
 void configureTmcDriver() {
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
   const uint8_t version = static_cast<uint8_t>(tmcDriver.IOIN() >> 24);
-  if (version != 0x21) {
-    Serial.println("TMC2209 nu raspunde; setarea curentului nu a fost aplicata.");
+  tmcDriverConnected = version == TmcExpectedVersion;
+  if (!tmcDriverConnected) {
+    Serial.printf("%s nu raspunde; setarea curentului nu a fost aplicata.\n", TmcDriverName);
     return;
   }
 
@@ -340,7 +361,8 @@ void configureTmcDriver() {
   tmcDriver.en_spreadCycle(false);
   tmcDriver.pwm_autoscale(true);
 
-  Serial.printf("TMC2209 configurat: RUN=%u mA RMS HOLD=%u mA RMS R_SENSE=%.2f ohm\n",
+  Serial.printf("%s configurat: RUN=%u mA RMS HOLD=%u mA RMS R_SENSE=%.2f ohm\n",
+                TmcDriverName,
                 static_cast<unsigned int>(tmcRunCurrentMilliamps),
                 static_cast<unsigned int>(tmcRunCurrentMilliamps * TmcHoldCurrentMultiplier),
                 TmcRsenseOhms);
@@ -352,13 +374,13 @@ void printTmcSettings() {
   const uint32_t ioin = tmcDriver.IOIN();
   const uint8_t version = static_cast<uint8_t>(ioin >> 24);
 
-  Serial.println("--- TMC2209 UART ---");
+  Serial.printf("--- %s UART ---\n", TmcDriverName);
   Serial.printf("address=%u IOIN=0x%08lX version=0x%02X\n",
                 TmcUartAddress,
                 static_cast<unsigned long>(ioin),
                 version);
-  if (version != 0x21) {
-    Serial.println("TMC2209 fara raspuns valid; verifica PDN_UART, GND si adresa MS1/MS2.");
+  if (version != TmcExpectedVersion) {
+    Serial.printf("%s fara raspuns valid; verifica PDN_UART, GND si adresa MS1/MS2.\n", TmcDriverName);
     Serial.println("--------------------");
     return;
   }
@@ -390,18 +412,18 @@ void printTmcSettings() {
                 static_cast<unsigned long>((iholdIrun >> 8) & 0x1F),
                 static_cast<unsigned long>((iholdIrun >> 16) & 0x0F));
   Serial.printf("PWMCONF=0x%08lX\n", static_cast<unsigned long>(pwmconf));
-  Serial.printf("DRV_STATUS=0x%08lX ot=%s otpw=%s stallGuard=%s standstill=%s\n",
+  Serial.printf("DRV_STATUS=0x%08lX ot=%s otpw=%s stealthChop=%s standstill=%s\n",
                 static_cast<unsigned long>(drvStatus),
-                (drvStatus & (1UL << 25)) ? "YES" : "NO",
-                (drvStatus & (1UL << 26)) ? "YES" : "NO",
-                (drvStatus & (1UL << 24)) ? "YES" : "NO",
-                (drvStatus & (1UL << 31)) ? "YES" : "NO");
+                tmcDriver.ot() ? "YES" : "NO",
+                tmcDriver.otpw() ? "YES" : "NO",
+                tmcDriver.stealth() ? "YES" : "NO",
+                tmcDriver.stst() ? "YES" : "NO");
   Serial.printf("Faze: openA=%s openB=%s shortA=%s shortB=%s CS_ACTUAL=%lu\n",
-                (drvStatus & (1UL << 29)) ? "YES" : "NO",
-                (drvStatus & (1UL << 30)) ? "YES" : "NO",
-                (drvStatus & (1UL << 27)) ? "YES" : "NO",
-                (drvStatus & (1UL << 28)) ? "YES" : "NO",
-                static_cast<unsigned long>((drvStatus >> 16) & 0x1F));
+                tmcDriver.ola() ? "YES" : "NO",
+                tmcDriver.olb() ? "YES" : "NO",
+                tmcDriver.s2ga() ? "YES" : "NO",
+                tmcDriver.s2gb() ? "YES" : "NO",
+                static_cast<unsigned long>(tmcDriver.cs_actual()));
   Serial.printf("IFCNT=%u\n", tmcDriver.IFCNT());
   Serial.println("Rezumat configuratie:");
   Serial.printf("  RUN: aproximativ %u mA RMS\n", runCurrentMilliamps);
@@ -415,7 +437,7 @@ void printTmcSettings() {
   Serial.printf("  Mod functionare: %s\n", (gconf & (1UL << 2)) ? "SpreadCycle" : "StealthChop");
   Serial.println("--------------------");
 #else
-  Serial.println("TMC2209 UART este configurat doar pentru ESP32-C3.");
+  Serial.println("Driverul TMC UART este configurat doar pentru ESP32-C3.");
 #endif
 }
 
@@ -545,7 +567,8 @@ void setup() {
 
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
   tmcSerial.begin(TmcUartBaudRate, SERIAL_8N1, Pins::TmcUartRx, Pins::TmcUartTx);
-  Serial.printf("TMC2209 UART: RX=GPIO%u TX=GPIO%u baud=%lu address=%u\n",
+  Serial.printf("%s UART: RX=GPIO%u TX=GPIO%u baud=%lu address=%u\n",
+                TmcDriverName,
                 Pins::TmcUartRx,
                 Pins::TmcUartTx,
                 static_cast<unsigned long>(TmcUartBaudRate),
